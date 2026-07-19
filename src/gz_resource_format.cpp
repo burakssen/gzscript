@@ -37,6 +37,8 @@ Error GzResourceSaver::_save(const Ref<Resource> &resource, const String &path,
   Ref<FileAccess> file = FileAccess::open(path, FileAccess::WRITE);
   if (file.is_null() || !file->store_string(script->get_source_code()))
     return ERR_CANT_CREATE;
+  file->flush();
+  file->close();
   script->set_path(path);
   return script->reload(false);
 }
