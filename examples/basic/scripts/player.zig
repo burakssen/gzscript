@@ -23,7 +23,9 @@ pub fn init(ctx: gd.InitContext) !Self {
 }
 
 pub fn _ready(self: *Self) !void {
-    _ = self;
+    try self.base.set_position(.{ .x = 12.0, .y = 34.0 });
+    const position = try self.base.get_position();
+    if (position.x != 12.0 or position.y != 34.0) return error.PositionMismatch;
     gd.log.info("Zig player ready", .{});
 }
 

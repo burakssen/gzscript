@@ -28,3 +28,31 @@ test "adapter reflects explicit exports only" {
     try std.testing.expectEqual(@as(f64, 10), descriptor.properties.?[0].default_value.data.floating);
     try std.testing.expectEqualStrings("Node2D", descriptor.base_class.slice());
 }
+
+test "2D wrappers expose typed position methods" {
+    try std.testing.expect(@hasDecl(gd.Node2D, "set_position"));
+    try std.testing.expect(@hasDecl(gd.Node2D, "get_position"));
+    try std.testing.expect(@hasDecl(gd.Sprite2D, "set_position"));
+    try std.testing.expect(@hasDecl(gd.Sprite2D, "get_position"));
+}
+
+test "class factories preserve identity and ABI layout" {
+    comptime {
+        if (gd.Node == gd.Control) @compileError("Node and Control must be distinct types");
+        if (gd.Node2D == gd.Sprite2D) @compileError("Node2D and Sprite2D must be distinct types");
+    }
+
+    try std.testing.expectEqualStrings("Node", gd.Node.godot_class);
+    try std.testing.expectEqualStrings("Control", gd.Control.godot_class);
+    try std.testing.expectEqualStrings("Node2D", gd.Node2D.godot_class);
+    try std.testing.expectEqualStrings("Sprite2D", gd.Sprite2D.godot_class);
+
+    inline for (.{ gd.Node, gd.Control, gd.Node2D, gd.Sprite2D }) |Class| {
+        try std.testing.expectEqual(@sizeOf(u64), @sizeOf(Class));
+        try std.testing.expectEqual(@alignOf(u64), @alignOf(Class));
+        try std.testing.expectEqual(@as(usize, 0), @offsetOf(Class, "owner"));
+    }
+
+    try std.testing.expect(!@hasDecl(gd.Node, "set_position"));
+    try std.testing.expect(!@hasDecl(gd.Control, "set_position"));
+}

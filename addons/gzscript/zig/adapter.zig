@@ -4,9 +4,9 @@ const properties = @import("property.zig");
 const runtime = @import("runtime.zig");
 
 fn baseName(comptime T: type) []const u8 {
-    const full = @typeName(T);
-    const index = std.mem.lastIndexOfScalar(u8, full, '.') orelse return full;
-    return full[index + 1 ..];
+    if (!@hasDecl(T, "godot_class"))
+        @compileError("Zig script Base must declare pub const godot_class");
+    return T.godot_class;
 }
 
 fn methodCount(comptime T: type) usize {
