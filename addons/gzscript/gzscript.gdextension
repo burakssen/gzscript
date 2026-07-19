@@ -6,8 +6,10 @@ reloadable = true
 
 [libraries]
 
-macos.debug = "res://addons/gzscript/bin/libgzscript.macos.template_debug.framework"
-macos.release = "res://addons/gzscript/bin/libgzscript.macos.template_release.framework"
+macos.debug.x86_64 = "res://addons/gzscript/bin/libgzscript.macos.template_debug.x86_64.framework"
+macos.release.x86_64 = "res://addons/gzscript/bin/libgzscript.macos.template_release.x86_64.framework"
+macos.debug.arm64 = "res://addons/gzscript/bin/libgzscript.macos.template_debug.arm64.framework"
+macos.release.arm64 = "res://addons/gzscript/bin/libgzscript.macos.template_release.arm64.framework"
 linux.debug.x86_64 = "res://addons/gzscript/bin/libgzscript.linux.template_debug.x86_64.so"
 linux.release.x86_64 = "res://addons/gzscript/bin/libgzscript.linux.template_release.x86_64.so"
 linux.debug.arm64 = "res://addons/gzscript/bin/libgzscript.linux.template_debug.arm64.so"

@@ -8,8 +8,8 @@ sources = Glob("src/*.cpp")
 
 if env["platform"] == "macos":
     library = env.SharedLibrary(
-        "addons/gzscript/bin/libgzscript.macos.{}.framework/libgzscript.macos.{}".format(
-            env["target"], env["target"]
+        "addons/gzscript/bin/libgzscript.macos.{}.{}.framework/libgzscript.macos.{}.{}".format(
+            env["target"], env["arch"], env["target"], env["arch"]
         ),
         source=sources,
     )

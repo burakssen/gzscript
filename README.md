@@ -22,12 +22,13 @@ git submodule update --init
 ```
 
 Build the extension for the current desktop platform. Supported SCons platform
-and architecture combinations are `macos`/`universal`, `linux`/`x86_64`,
-`linux`/`arm64`, `windows`/`x86_64`, and `windows`/`arm64`:
+and architecture combinations are `macos`/`x86_64`, `macos`/`arm64`,
+`linux`/`x86_64`, `linux`/`arm64`, `windows`/`x86_64`, and
+`windows`/`arm64`:
 
 ```sh
-uvx --from scons scons platform=macos target=template_debug arch=universal -j8
-uvx --from scons scons platform=macos target=template_release arch=universal -j8
+uvx --from scons scons platform=macos target=template_debug arch=arm64 -j8
+uvx --from scons scons platform=macos target=template_release arch=arm64 -j8
 ```
 
 Replace the platform and architecture values when building natively on Linux or
@@ -37,7 +38,7 @@ builds and release packages.
 
 The `gzscript-desktop` GitHub Actions artifact is an installable package with
 the complete `addons/gzscript` directory. It includes debug and release builds
-for macOS universal, Linux x86_64/ARM64, and Windows x86_64/ARM64.
+for macOS, Linux, and Windows on x86_64 and ARM64.
 
 ## Use
 
