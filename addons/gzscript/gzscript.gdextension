@@ -1,0 +1,20 @@
+[configuration]
+
+entry_symbol = "gzscript_library_init"
+compatibility_minimum = "4.7"
+reloadable = true
+
+[libraries]
+
+macos.debug.x86_64 = "res://addons/gzscript/bin/libgzscript.macos.template_debug.x86_64.framework"
+macos.release.x86_64 = "res://addons/gzscript/bin/libgzscript.macos.template_release.x86_64.framework"
+macos.debug.arm64 = "res://addons/gzscript/bin/libgzscript.macos.template_debug.arm64.framework"
+macos.release.arm64 = "res://addons/gzscript/bin/libgzscript.macos.template_release.arm64.framework"
+linux.debug.x86_64 = "res://addons/gzscript/bin/libgzscript.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://addons/gzscript/bin/libgzscript.linux.template_release.x86_64.so"
+linux.debug.arm64 = "res://addons/gzscript/bin/libgzscript.linux.template_debug.arm64.so"
+linux.release.arm64 = "res://addons/gzscript/bin/libgzscript.linux.template_release.arm64.so"
+windows.debug.x86_64 = "res://addons/gzscript/bin/libgzscript.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://addons/gzscript/bin/libgzscript.windows.template_release.x86_64.dll"
+windows.debug.arm64 = "res://addons/gzscript/bin/libgzscript.windows.template_debug.arm64.dll"
+windows.release.arm64 = "res://addons/gzscript/bin/libgzscript.windows.template_release.arm64.dll"
