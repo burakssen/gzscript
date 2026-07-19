@@ -1,0 +1,20 @@
+; Integration project for developing the addon in place.
+config_version=5
+
+[application]
+
+config/name="gzscript integration"
+run/main_scene="res://examples/basic/main.tscn"
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gzscript/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"

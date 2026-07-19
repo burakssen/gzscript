@@ -1,0 +1,7 @@
+.sconsign.dblite
+*.o
+*.os
+godot-cpp/bin/
+godot-cpp/gen/
+.godot/
+addons/gzscript/bin/
