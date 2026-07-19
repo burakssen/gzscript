@@ -42,7 +42,14 @@ public:
   bool _can_inherit_from_file() const override;
   int32_t _find_function(const godot::String &function,
                          const godot::String &code) const override;
+  godot::String
+  _make_function(const godot::String &class_name,
+                 const godot::String &function_name,
+                 const godot::PackedStringArray &function_args) const override;
   bool _can_make_function() const override;
+  godot::Error _open_in_external_editor(const godot::Ref<godot::Script> &script,
+                                        int32_t line, int32_t column) override;
+  bool _overrides_external_editor() override;
   godot::Dictionary _complete_code(const godot::String &code,
                                    const godot::String &path,
                                    godot::Object *owner) const override;
@@ -52,8 +59,18 @@ public:
                                  godot::Object *owner) const override;
   godot::String _auto_indent_code(const godot::String &code, int32_t from_line,
                                   int32_t to_line) const override;
+  void _add_global_constant(const godot::StringName &name,
+                            const godot::Variant &value) override;
+  void _add_named_global_constant(const godot::StringName &name,
+                                  const godot::Variant &value) override;
+  void _remove_named_global_constant(const godot::StringName &name) override;
   void _thread_enter() override;
   void _thread_exit() override;
+  godot::String _debug_get_error() const override;
+  int32_t _debug_get_stack_level_count() const override;
+  int32_t _debug_get_stack_level_line(int32_t level) const override;
+  godot::String _debug_get_stack_level_function(int32_t level) const override;
+  godot::String _debug_get_stack_level_source(int32_t level) const override;
   godot::Dictionary _debug_get_stack_level_locals(int32_t level,
                                                   int32_t max_subitems,
                                                   int32_t max_depth) override;
@@ -63,6 +80,9 @@ public:
   void *_debug_get_stack_level_instance(int32_t level) override;
   godot::Dictionary _debug_get_globals(int32_t max_subitems,
                                        int32_t max_depth) override;
+  godot::String _debug_parse_stack_level_expression(
+      int32_t level, const godot::String &expression, int32_t max_subitems,
+      int32_t max_depth) override;
   godot::TypedArray<godot::Dictionary> _debug_get_current_stack_info() override;
   void _reload_all_scripts() override;
   void _reload_scripts(const godot::Array &scripts, bool soft_reload) override;
@@ -72,6 +92,9 @@ public:
   godot::TypedArray<godot::Dictionary> _get_public_functions() const override;
   godot::Dictionary _get_public_constants() const override;
   godot::TypedArray<godot::Dictionary> _get_public_annotations() const override;
+  void _profiling_start() override;
+  void _profiling_stop() override;
+  void _profiling_set_save_native_calls(bool enable) override;
   int32_t _profiling_get_accumulated_data(
       godot::ScriptLanguageExtensionProfilingInfo *info_array,
       int32_t info_max) override;
