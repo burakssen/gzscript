@@ -9,7 +9,7 @@ The `godot-cpp` submodule is pinned to commit `ba0edfed90512ec64aba51d4295a3e7e3
 ## Requirements
 
 - Godot 4.7 stable
-- Zig 0.16.0 available as `zig` on `PATH`
+- Zig 0.16.0 installed locally
 - macOS ARM64
 - `uv` for the documented build command
 
@@ -37,6 +37,8 @@ The resulting extension is written to `addons/gzscript/bin`. The Zig SDK in `add
 4. Restart the editor.
 5. Select a node and use **Attach Script**.
 6. Choose **Zig**, create a `.zig` file, and save it.
+
+gzscript resolves the compiler from **Project Settings > Gzscript > Compiler > Zig Path**, then `GZSCRIPT_ZIG_PATH`, then the standard zvm path at `~/.zvm/bin/zig`, and finally `zig` on `PATH`. Set **Zig Path** to an absolute executable path when using another version manager or when Godot is launched from the macOS GUI.
 
 The addon compiles scripts on resource load and save. Its editor plugin also recompiles loaded Zig scripts after filesystem changes and immediately before Run. A failed build blocks Run and leaves the `.zig` resource attached.
 

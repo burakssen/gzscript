@@ -4,9 +4,11 @@
 
 #include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
@@ -14,9 +16,28 @@ using namespace godot;
 GzBuildManager *GzBuildManager::singleton = nullptr;
 
 namespace {
+constexpr const char *ZIG_PATH_SETTING = "gzscript/compiler/zig_path";
+
 String zig_path(const String &relative) {
   return ProjectSettings::get_singleton()->globalize_path(
       "res://addons/gzscript/zig/" + relative);
+}
+
+String zig_executable() {
+  ProjectSettings *settings = ProjectSettings::get_singleton();
+  String configured = settings->get_setting(ZIG_PATH_SETTING, String());
+  if (!configured.is_empty()) {
+    return configured;
+  }
+
+  OS *os = OS::get_singleton();
+  String from_environment = os->get_environment("GZSCRIPT_ZIG_PATH");
+  if (!from_environment.is_empty()) {
+    return from_environment;
+  }
+
+  String zvm_path = os->get_environment("HOME").path_join(".zvm/bin/zig");
+  return FileAccess::file_exists(zvm_path) ? zvm_path : "zig";
 }
 
 bool write_text(const String &path, const String &contents) {
@@ -35,7 +56,22 @@ void GzBuildManager::_bind_methods() {
                        &GzBuildManager::get_last_diagnostics);
 }
 
-GzBuildManager::GzBuildManager() { singleton = this; }
+GzBuildManager::GzBuildManager() {
+  singleton = this;
+
+  ProjectSettings *settings = ProjectSettings::get_singleton();
+  if (!settings->has_setting(ZIG_PATH_SETTING)) {
+    settings->set_setting(ZIG_PATH_SETTING, String());
+  }
+  settings->set_initial_value(ZIG_PATH_SETTING, String());
+  settings->set_as_basic(ZIG_PATH_SETTING, true);
+
+  Dictionary property_info;
+  property_info["name"] = ZIG_PATH_SETTING;
+  property_info["type"] = Variant::STRING;
+  property_info["hint"] = PROPERTY_HINT_GLOBAL_FILE;
+  settings->add_property_info(property_info);
+}
 
 GzBuildManager::~GzBuildManager() {
   if (singleton == this) {
@@ -64,6 +100,13 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
   String generated = cache_root.path_join("generated/script_" + key + ".zig");
   String output = cache_root.path_join("modules/macos-aarch64/script_" + key +
                                        module_extension());
+  String source_path =
+      ProjectSettings::get_singleton()->globalize_path(resource_path);
+  if (!FileAccess::file_exists(source_path)) {
+    last_diagnostics = "Zig script not found: " + source_path;
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
+  }
   {
     String adapter =
         "const gd = @import(\"godot\");\n"
@@ -93,14 +136,12 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
     arguments.push_back("-Mroot=" + generated);
     arguments.push_back("--dep");
     arguments.push_back("godot");
-    arguments.push_back(
-        "-Muser_script=" +
-        ProjectSettings::get_singleton()->globalize_path(resource_path));
+    arguments.push_back("-Muser_script=" + source_path);
     arguments.push_back("-Mgodot=" + zig_path("godot.zig"));
 
     Array output_lines;
-    int exit_code =
-        OS::get_singleton()->execute("zig", arguments, output_lines, true);
+    int exit_code = OS::get_singleton()->execute(zig_executable(), arguments,
+                                                 output_lines, true);
     last_diagnostics =
         output_lines.is_empty() ? String() : String(output_lines[0]);
     if (exit_code != 0) {
