@@ -4,7 +4,11 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#ifdef WINDOWS_ENABLED
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <string>
 
 using namespace godot;
@@ -114,6 +118,41 @@ GzStatus object_emit_signal(uint64_t object_id, GzStringView signal,
              : GZ_STATUS_SCRIPT_ERROR;
 }
 
+void close_library(void *handle) {
+#ifdef WINDOWS_ENABLED
+  FreeLibrary(reinterpret_cast<HMODULE>(handle));
+#else
+  dlclose(handle);
+#endif
+}
+
+void *open_library(const String &path, String &error) {
+#ifdef WINDOWS_ENABLED
+  Char16String wide_path = path.utf16();
+  HMODULE handle =
+      LoadLibraryW(reinterpret_cast<const wchar_t *>(wide_path.get_data()));
+  if (!handle)
+    error = "LoadLibraryW failed with error " +
+            String::num_int64(static_cast<int64_t>(GetLastError()));
+  return reinterpret_cast<void *>(handle);
+#else
+  CharString native_path = path.utf8();
+  void *handle = dlopen(native_path.get_data(), RTLD_NOW | RTLD_LOCAL);
+  if (!handle)
+    error = String::utf8(dlerror());
+  return handle;
+#endif
+}
+
+GzScriptInit find_init(void *handle) {
+#ifdef WINDOWS_ENABLED
+  return reinterpret_cast<GzScriptInit>(GetProcAddress(
+      reinterpret_cast<HMODULE>(handle), "gzscript_script_init"));
+#else
+  return reinterpret_cast<GzScriptInit>(dlsym(handle, "gzscript_script_init"));
+#endif
+}
+
 const GzEngineApi engine_api = {
     GZSCRIPT_ABI_VERSION, sizeof(GzEngineApi), log_info, log_error,
     object_call,          object_emit_signal,
@@ -121,38 +160,33 @@ const GzEngineApi engine_api = {
 } // namespace
 
 GzCompiledModule::~GzCompiledModule() {
-  if (handle) {
-    dlclose(handle);
-  }
+  if (handle)
+    close_library(handle);
 }
 
 std::shared_ptr<GzCompiledModule> GzCompiledModule::load(const String &p_path,
                                                          String &error) {
-  CharString native_path = p_path.utf8();
-  void *handle = dlopen(native_path.get_data(), RTLD_NOW | RTLD_LOCAL);
-  if (!handle) {
-    error = String::utf8(dlerror());
+  void *handle = open_library(p_path, error);
+  if (!handle)
     return {};
-  }
 
-  auto init =
-      reinterpret_cast<GzScriptInit>(dlsym(handle, "gzscript_script_init"));
+  GzScriptInit init = find_init(handle);
   if (!init) {
     error = "Compiled Zig script does not export gzscript_script_init";
-    dlclose(handle);
+    close_library(handle);
     return {};
   }
 
   const GzScriptDescriptor *descriptor = nullptr;
   if (init(&engine_api, &descriptor) != GZ_STATUS_OK || !descriptor) {
     error = "Compiled Zig script initialization failed";
-    dlclose(handle);
+    close_library(handle);
     return {};
   }
   if (descriptor->abi_version != GZSCRIPT_ABI_VERSION ||
       descriptor->struct_size != sizeof(GzScriptDescriptor)) {
     error = "Compiled Zig script ABI does not match gzscript";
-    dlclose(handle);
+    close_library(handle);
     return {};
   }
 

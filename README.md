@@ -2,7 +2,7 @@
 
 gzscript is a Godot 4.7 GDExtension that makes Zig 0.16 scripts attachable to Godot objects. It compiles each `.zig` script to a content-addressed native module automatically, without a project `build.zig` or a custom Godot build.
 
-The current MVP targets macOS ARM64.
+The current MVP targets macOS, Linux, and Windows on x86_64 and ARM64.
 
 The `godot-cpp` submodule is pinned to commit `ba0edfed90512ec64aba51d4295a3e7e30112f86`, whose extension API reports Godot 4.7 stable.
 
@@ -10,7 +10,7 @@ The `godot-cpp` submodule is pinned to commit `ba0edfed90512ec64aba51d4295a3e7e3
 
 - Godot 4.7 stable
 - Zig 0.16.0 installed locally
-- macOS ARM64
+- macOS, Linux, or Windows on x86_64 or ARM64
 - `uv` for the documented build command
 
 ## Build
@@ -21,13 +21,23 @@ Initialize the dependency after cloning:
 git submodule update --init
 ```
 
-Build the extension:
+Build the extension for the current desktop platform. Supported SCons platform
+and architecture combinations are `macos`/`universal`, `linux`/`x86_64`,
+`linux`/`arm64`, `windows`/`x86_64`, and `windows`/`arm64`:
 
 ```sh
-uvx --from scons scons platform=macos target=template_debug arch=arm64 -j8
+uvx --from scons scons platform=macos target=template_debug arch=universal -j8
+uvx --from scons scons platform=macos target=template_release arch=universal -j8
 ```
 
-The resulting extension is written to `addons/gzscript/bin`. The Zig SDK in `addons/gzscript/zig` is the canonical source used by both development builds and release packages. Prebuilt frameworks are distributed as release artifacts rather than committed to the source repository.
+Replace the platform and architecture values when building natively on Linux or
+Windows. The resulting extension is written to `addons/gzscript/bin`. The Zig
+SDK in `addons/gzscript/zig` is the canonical source used by both development
+builds and release packages.
+
+The `gzscript-desktop` GitHub Actions artifact is an installable package with
+the complete `addons/gzscript` directory. It includes debug and release builds
+for macOS universal, Linux x86_64/ARM64, and Windows x86_64/ARM64.
 
 ## Use
 
@@ -107,8 +117,7 @@ This runs Zig reflection tests, headless lifecycle/property and save integration
 
 ## MVP limitations
 
-- macOS ARM64 only.
+- Mobile and Web exports are not implemented.
 - Active instances are not migrated after recompilation.
-- Export presets and cross-compilation are not implemented yet.
 - Script callbacks currently cover `_ready`, `_process`, and `_physics_process`.
 - Godot API wrappers currently expose object ownership, logging, and dynamic method calls rather than generated typed methods for every engine class.

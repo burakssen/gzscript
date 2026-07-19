@@ -3,6 +3,7 @@
 #include "gz_script.hpp"
 
 #include <godot_cpp/classes/dir_access.hpp>
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/global_constants.hpp>
 #include <godot_cpp/classes/os.hpp>
@@ -36,8 +37,13 @@ String zig_executable() {
     return from_environment;
   }
 
-  String zvm_path = os->get_environment("HOME").path_join(".zvm/bin/zig");
-  return FileAccess::file_exists(zvm_path) ? zvm_path : "zig";
+  String home = os->get_environment("HOME");
+  if (home.is_empty())
+    home = os->get_environment("USERPROFILE");
+  String executable = os->get_name() == "Windows" ? "zig.exe" : "zig";
+  String zvm_path = home.path_join(".zvm/bin").path_join(executable);
+  return !home.is_empty() && FileAccess::file_exists(zvm_path) ? zvm_path
+                                                               : executable;
 }
 
 bool write_text(const String &path, const String &contents) {
@@ -45,7 +51,26 @@ bool write_text(const String &path, const String &contents) {
   return file.is_valid() && file->store_string(contents);
 }
 
-String module_extension() { return ".dylib"; }
+String platform_name() {
+  String name = OS::get_singleton()->get_name();
+  if (name == "macOS")
+    return "macos";
+  if (name == "Linux")
+    return "linux";
+  if (name == "Windows")
+    return "windows";
+  return {};
+}
+
+String module_extension(const String &platform) {
+  if (platform == "macos")
+    return ".dylib";
+  if (platform == "linux")
+    return ".so";
+  if (platform == "windows")
+    return ".dll";
+  return {};
+}
 } // namespace
 
 void GzBuildManager::_bind_methods() {
@@ -85,22 +110,35 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
   String project_root =
       ProjectSettings::get_singleton()->globalize_path("res://");
   String cache_root = project_root.path_join(".godot/gzscript");
+  String platform = platform_name();
+  String architecture = Engine::get_singleton()->get_architecture_name();
+  String extension = module_extension(platform);
+  if (platform.is_empty() || extension.is_empty()) {
+    last_diagnostics = "gzscript runtime compilation is only supported on "
+                       "macOS, Linux, and Windows";
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
+  }
+  String module_directory =
+      cache_root.path_join("modules/" + platform + "-" + architecture);
   DirAccess::make_dir_recursive_absolute(cache_root.path_join("generated"));
-  DirAccess::make_dir_recursive_absolute(
-      cache_root.path_join("modules/macos-aarch64"));
+  DirAccess::make_dir_recursive_absolute(module_directory);
 
-  String sdk_fingerprint =
-      FileAccess::get_file_as_string("res://addons/gzscript/zig/godot.zig") +
-      FileAccess::get_file_as_string("res://addons/gzscript/zig/adapter.zig") +
-      FileAccess::get_file_as_string("res://addons/gzscript/zig/abi.zig");
+  String sdk_fingerprint;
+  const char *sdk_files[] = {"abi.zig",   "adapter.zig",  "class.zig",
+                             "godot.zig", "property.zig", "runtime.zig",
+                             "signal.zig"};
+  for (const char *file : sdk_files)
+    sdk_fingerprint += FileAccess::get_file_as_string(
+        "res://addons/gzscript/zig/" + String(file));
   String key =
       (source + sdk_fingerprint + String::num_int64(GZSCRIPT_ABI_VERSION) +
-       OS::get_singleton()->get_version() + "zig-0.16.0")
+       platform + architecture + OS::get_singleton()->get_version() +
+       "zig-0.16.0")
           .sha256_text()
           .substr(0, 16);
   String generated = cache_root.path_join("generated/script_" + key + ".zig");
-  String output = cache_root.path_join("modules/macos-aarch64/script_" + key +
-                                       module_extension());
+  String output = module_directory.path_join("script_" + key + extension);
   String source_path =
       ProjectSettings::get_singleton()->globalize_path(resource_path);
   if (!FileAccess::file_exists(source_path)) {
