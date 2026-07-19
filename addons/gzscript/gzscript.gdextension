@@ -1,0 +1,10 @@
+[configuration]
+
+entry_symbol = "gzscript_library_init"
+compatibility_minimum = "4.7"
+reloadable = true
+
+[libraries]
+
+macos.debug = "res://addons/gzscript/bin/libgzscript.macos.template_debug.framework"
+macos.release = "res://addons/gzscript/bin/libgzscript.macos.template_release.framework"
