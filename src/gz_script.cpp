@@ -4,10 +4,13 @@
 #include "gz_language.hpp"
 
 #include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/classes/wrapped.hpp>
 #include <godot_cpp/core/gdextension_interface_loader.hpp>
+#include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/core/property_info.hpp>
 #include <godot_cpp/godot.hpp>
+#include <godot_cpp/templates/list.hpp>
 
 #include <string>
 #include <vector>
@@ -108,6 +111,27 @@ Variant::Type variant_type(uint32_t type) {
   }
 }
 
+void append_properties(List<PropertyInfo> &result,
+                       const GzScriptDescriptor *descriptor) {
+  for (uint32_t i = 0; i < descriptor->property_count; ++i) {
+    const GzPropertyDescriptor &property = descriptor->properties[i];
+    if (property.category.len > 0)
+      result.push_back(
+          PropertyInfo(Variant::NIL, StringName(view_string(property.category)),
+                       PROPERTY_HINT_NONE, "", PROPERTY_USAGE_CATEGORY));
+    String hint = property.hint == GZ_PROPERTY_HINT_RANGE
+                      ? String::num(property.range_min) + "," +
+                            String::num(property.range_max) + "," +
+                            String::num(property.range_step)
+                      : String();
+    result.push_back(PropertyInfo(
+        variant_type(property.type), StringName(view_string(property.name)),
+        property.hint == GZ_PROPERTY_HINT_RANGE ? PROPERTY_HINT_RANGE
+                                                : PROPERTY_HINT_NONE,
+        hint));
+  }
+}
+
 int property_index(InstanceData *data, const StringName &name) {
   const GzScriptDescriptor *descriptor = data->module->get_descriptor();
   for (uint32_t i = 0; i < descriptor->property_count; ++i) {
@@ -144,13 +168,23 @@ GDExtensionBool instance_get(void *pointer, GDExtensionConstStringNamePtr name,
   return true;
 }
 
-const GDExtensionPropertyInfo *instance_get_property_list(void *,
+const GDExtensionPropertyInfo *instance_get_property_list(void *pointer,
                                                           uint32_t *count) {
-  *count = 0;
-  return nullptr;
+  auto *data = static_cast<InstanceData *>(pointer);
+  auto *properties = memnew(List<PropertyInfo>);
+  append_properties(*properties, data->module->get_descriptor());
+  if (properties->is_empty()) {
+    memdelete(properties);
+    *count = 0;
+    return nullptr;
+  }
+  return internal::create_c_property_list(properties, count);
 }
-void instance_free_property_list(void *, const GDExtensionPropertyInfo *,
-                                 uint32_t) {}
+void instance_free_property_list(void *, const GDExtensionPropertyInfo *list,
+                                 uint32_t) {
+  if (list)
+    internal::free_c_property_list(const_cast<GDExtensionPropertyInfo *>(list));
+}
 GDExtensionBool instance_property_can_revert(void *,
                                              GDExtensionConstStringNamePtr) {
   return false;
@@ -327,9 +361,17 @@ void *GzScript::_instance_create(Object *owner) const {
 }
 
 void *GzScript::_placeholder_instance_create(Object *owner) const {
-  return gdextension_interface::placeholder_script_instance_create(
+  void *placeholder = gdextension_interface::placeholder_script_instance_create(
       GzLanguage::get_singleton()->_owner, const_cast<GzScript *>(this)->_owner,
       owner->_owner);
+  GzScript *script = const_cast<GzScript *>(this);
+  script->placeholders.insert(placeholder);
+  script->_update_exports();
+  return placeholder;
+}
+
+void GzScript::_placeholder_erased(void *placeholder) {
+  placeholders.erase(placeholder);
 }
 
 bool GzScript::_has_source_code() const { return true; }
@@ -345,7 +387,7 @@ Error GzScript::_reload(bool) {
   }
   module = std::move(next);
   valid = true;
-  emit_changed();
+  _update_exports();
   return OK;
 }
 
@@ -411,7 +453,22 @@ GzScript::_get_property_default_value(const StringName &property) const {
   return Variant();
 }
 
-void GzScript::_update_exports() { emit_changed(); }
+void GzScript::_update_exports() {
+  TypedArray<Dictionary> properties = _get_script_property_list();
+  Dictionary defaults;
+  if (module) {
+    const GzScriptDescriptor *descriptor = module->get_descriptor();
+    for (uint32_t i = 0; i < descriptor->property_count; ++i) {
+      const GzPropertyDescriptor &property = descriptor->properties[i];
+      defaults[StringName(view_string(property.name))] =
+          value_variant(property.default_value);
+    }
+  }
+  for (void *placeholder : placeholders)
+    gdextension_interface::placeholder_script_instance_update(
+        placeholder, properties._native_ptr(), defaults._native_ptr());
+  emit_changed();
+}
 
 TypedArray<Dictionary> GzScript::_get_script_method_list() const {
   TypedArray<Dictionary> result;
@@ -427,24 +484,10 @@ TypedArray<Dictionary> GzScript::_get_script_property_list() const {
   TypedArray<Dictionary> result;
   if (!module)
     return result;
-  for (uint32_t i = 0; i < module->get_descriptor()->property_count; ++i) {
-    const GzPropertyDescriptor &property =
-        module->get_descriptor()->properties[i];
-    if (property.category.len > 0)
-      result.push_back(Dictionary(
-          PropertyInfo(Variant::NIL, StringName(view_string(property.category)),
-                       PROPERTY_HINT_NONE, "", PROPERTY_USAGE_CATEGORY)));
-    String hint = property.hint == GZ_PROPERTY_HINT_RANGE
-                      ? String::num(property.range_min) + "," +
-                            String::num(property.range_max) + "," +
-                            String::num(property.range_step)
-                      : String();
-    result.push_back(Dictionary(PropertyInfo(
-        variant_type(property.type), StringName(view_string(property.name)),
-        property.hint == GZ_PROPERTY_HINT_RANGE ? PROPERTY_HINT_RANGE
-                                                : PROPERTY_HINT_NONE,
-        hint)));
-  }
+  List<PropertyInfo> properties;
+  append_properties(properties, module->get_descriptor());
+  for (const PropertyInfo &property : properties)
+    result.push_back(Dictionary(property));
   return result;
 }
 

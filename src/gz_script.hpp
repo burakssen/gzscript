@@ -14,6 +14,7 @@ class GzScript : public godot::ScriptExtension {
   godot::String source;
   std::shared_ptr<GzCompiledModule> module;
   bool valid = false;
+  mutable std::unordered_set<void *> placeholders;
   static std::unordered_set<GzScript *> scripts;
 
 protected:
@@ -34,6 +35,7 @@ public:
   godot::StringName _get_instance_base_type() const override;
   void *_instance_create(godot::Object *owner) const override;
   void *_placeholder_instance_create(godot::Object *owner) const override;
+  void _placeholder_erased(void *placeholder) override;
   bool _has_source_code() const override;
   godot::String _get_source_code() const override;
   void _set_source_code(const godot::String &code) override;

@@ -54,6 +54,7 @@ void GzBuildManager::_bind_methods() {
   ClassDB::bind_method(D_METHOD("compile_all"), &GzBuildManager::compile_all);
   ClassDB::bind_method(D_METHOD("get_last_diagnostics"),
                        &GzBuildManager::get_last_diagnostics);
+  ADD_SIGNAL(MethodInfo("script_compiled"));
 }
 
 GzBuildManager::GzBuildManager() {
@@ -158,6 +159,8 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
     DirAccess::remove_absolute(output);
     last_diagnostics = error;
     UtilityFunctions::printerr("gzscript: ", error);
+  } else {
+    emit_signal("script_compiled");
   }
   return module;
 }
