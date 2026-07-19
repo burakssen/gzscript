@@ -13,6 +13,11 @@ const TestScript = struct {
         .amplitude = gd.property(.{ .category = "Movement", .range = .{ .min = 0, .max = 100, .step = 0.1 } }),
     };
 
+    pub const signals = .{
+        .started = gd.signal(.{}),
+        .position_changed = gd.signal(.{ .position = gd.Vector2 }),
+    };
+
     pub fn init(ctx: gd.InitContext) !Self {
         return .{ .base = .{ .owner = ctx.owner } };
     }
@@ -27,6 +32,17 @@ test "adapter reflects explicit exports only" {
     try std.testing.expectEqualStrings("Movement", descriptor.properties.?[0].category.slice());
     try std.testing.expectEqual(@as(f64, 10), descriptor.properties.?[0].default_value.data.floating);
     try std.testing.expectEqualStrings("Node2D", descriptor.base_class.slice());
+}
+
+test "adapter reflects signal declarations" {
+    const descriptor = gd.ScriptAdapter(TestScript).descriptor;
+    try std.testing.expectEqual(@as(u32, 2), descriptor.signal_count);
+    try std.testing.expectEqualStrings("started", descriptor.signals.?[0].name.slice());
+    try std.testing.expectEqual(@as(u32, 0), descriptor.signals.?[0].argument_count);
+    try std.testing.expectEqualStrings("position_changed", descriptor.signals.?[1].name.slice());
+    try std.testing.expectEqual(@as(u32, 1), descriptor.signals.?[1].argument_count);
+    try std.testing.expectEqualStrings("position", descriptor.signals.?[1].arguments.?[0].name.slice());
+    try std.testing.expectEqual(gd.abi.ValueType.vector2, descriptor.signals.?[1].arguments.?[0].type);
 }
 
 test "2D wrappers expose typed position methods" {
@@ -51,6 +67,7 @@ test "class factories preserve identity and ABI layout" {
         try std.testing.expectEqual(@sizeOf(u64), @sizeOf(Class));
         try std.testing.expectEqual(@alignOf(u64), @alignOf(Class));
         try std.testing.expectEqual(@as(usize, 0), @offsetOf(Class, "owner"));
+        try std.testing.expect(@hasDecl(Class, "emit_signal"));
     }
 
     try std.testing.expect(!@hasDecl(gd.Node, "set_position"));
