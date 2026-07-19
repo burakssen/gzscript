@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define GZSCRIPT_ABI_VERSION 1u
+#define GZSCRIPT_ABI_VERSION 2u
 
 typedef struct {
   const char *ptr;
@@ -79,6 +79,17 @@ typedef struct {
 } GzPropertyDescriptor;
 
 typedef struct {
+  GzStringView name;
+  uint32_t type;
+} GzSignalArgumentDescriptor;
+
+typedef struct {
+  GzStringView name;
+  const GzSignalArgumentDescriptor *arguments;
+  uint32_t argument_count;
+} GzSignalDescriptor;
+
+typedef struct {
   uint32_t abi_version;
   uint32_t struct_size;
   void (*log_info)(GzStringView message);
@@ -86,6 +97,9 @@ typedef struct {
   GzStatus (*object_call)(uint64_t object_id, GzStringView method,
                           const GzValue *arguments, uint32_t argument_count,
                           GzValue *result);
+  GzStatus (*object_emit_signal)(uint64_t object_id, GzStringView signal,
+                                 const GzValue *arguments,
+                                 uint32_t argument_count);
 } GzEngineApi;
 
 typedef GzStatus (*GzCreateInstance)(uint64_t owner_id, void **instance);
@@ -107,6 +121,8 @@ typedef struct {
   uint32_t method_count;
   const GzPropertyDescriptor *properties;
   uint32_t property_count;
+  const GzSignalDescriptor *signals;
+  uint32_t signal_count;
   GzCreateInstance create_instance;
   GzDestroyInstance destroy_instance;
   GzCallMethod call_method;

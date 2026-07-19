@@ -18,6 +18,11 @@ pub const exports = .{
     }),
 };
 
+pub const signals = .{
+    .zig_ready = gd.signal(.{}),
+    .position_changed = gd.signal(.{ .position = gd.Vector2 }),
+};
+
 pub fn init(ctx: gd.InitContext) !Self {
     return .{ .base = .{ .owner = ctx.owner } };
 }
@@ -26,6 +31,8 @@ pub fn _ready(self: *Self) !void {
     try self.base.set_position(.{ .x = 12.0, .y = 34.0 });
     const position = try self.base.get_position();
     if (position.x != 12.0 or position.y != 34.0) return error.PositionMismatch;
+    try self.base.emit_signal("zig_ready", .{});
+    try self.base.emit_signal("position_changed", .{position});
     gd.log.info("Zig player ready", .{});
 }
 

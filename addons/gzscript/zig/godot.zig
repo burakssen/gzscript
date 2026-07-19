@@ -3,10 +3,12 @@ const adapter = @import("adapter.zig");
 const classes = @import("class.zig");
 const properties = @import("property.zig");
 const runtime = @import("runtime.zig");
+const signals = @import("signal.zig");
 
 pub const ScriptAdapter = adapter.ScriptAdapter;
 pub const property = properties.property;
 pub const Property = properties.Property;
+pub const signal = signals.signal;
 pub const InitContext = runtime.InitContext;
 pub const Object = runtime.Object;
 pub const log = runtime.log;

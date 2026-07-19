@@ -15,6 +15,29 @@ fn methodCount(comptime T: type) usize {
         @as(usize, @intFromBool(@hasDecl(T, "_physics_process")));
 }
 
+fn signalCount(comptime T: type) usize {
+    return if (@hasDecl(T, "signals")) @typeInfo(@TypeOf(T.signals)).@"struct".fields.len else 0;
+}
+
+fn signalArgumentCount(comptime T: type) usize {
+    if (!@hasDecl(T, "signals")) return 0;
+    var count: usize = 0;
+    inline for (@typeInfo(@TypeOf(T.signals)).@"struct".fields) |field| {
+        const declaration = @field(T.signals, field.name);
+        if (!@hasDecl(@TypeOf(declaration), "arguments"))
+            @compileError("invalid signal declaration: " ++ field.name);
+        count += @typeInfo(@TypeOf(@TypeOf(declaration).arguments)).@"struct".fields.len;
+    }
+    return count;
+}
+
+fn signalValueType(comptime T: type) abi.ValueType {
+    return if (@typeInfo(T) == .@"struct" and @hasField(T, "owner"))
+        .object
+    else
+        properties.valueType(T);
+}
+
 fn invoke0(instance: anytype, comptime name: []const u8) abi.Status {
     const result = @call(.auto, @field(@TypeOf(instance.*), name), .{instance});
     if (@typeInfo(@TypeOf(result)) == .error_union) {
@@ -38,6 +61,8 @@ pub fn ScriptAdapter(comptime Script: type) type {
 
     const export_count = if (@hasDecl(Script, "exports")) @typeInfo(@TypeOf(Script.exports)).@"struct".fields.len else 0;
     const method_count = methodCount(Script);
+    const signal_count = signalCount(Script);
+    const signal_argument_count = signalArgumentCount(Script);
 
     return struct {
         const Box = struct {
@@ -47,6 +72,8 @@ pub fn ScriptAdapter(comptime Script: type) type {
 
         const methods: [method_count]abi.MethodDescriptor = buildMethods();
         const property_descriptors: [export_count]abi.PropertyDescriptor = buildProperties();
+        const signal_arguments: [signal_argument_count]abi.SignalArgumentDescriptor = buildSignalArguments();
+        const signal_descriptors: [signal_count]abi.SignalDescriptor = buildSignals();
 
         fn buildMethods() [method_count]abi.MethodDescriptor {
             var result: [method_count]abi.MethodDescriptor = undefined;
@@ -89,6 +116,40 @@ pub fn ScriptAdapter(comptime Script: type) type {
                     .range_step = if (options.range) |range| range.step else 0,
                     .default_value = properties.toValue(default_value),
                 };
+            }
+            return result;
+        }
+
+        fn buildSignalArguments() [signal_argument_count]abi.SignalArgumentDescriptor {
+            var result: [signal_argument_count]abi.SignalArgumentDescriptor = undefined;
+            var index: usize = 0;
+            if (!@hasDecl(Script, "signals")) return result;
+            inline for (@typeInfo(@TypeOf(Script.signals)).@"struct".fields) |signal_field| {
+                const declaration = @field(Script.signals, signal_field.name);
+                inline for (@typeInfo(@TypeOf(@TypeOf(declaration).arguments)).@"struct".fields) |argument_field| {
+                    result[index] = .{
+                        .name = .from(argument_field.name),
+                        .type = signalValueType(@field(@TypeOf(declaration).arguments, argument_field.name)),
+                    };
+                    index += 1;
+                }
+            }
+            return result;
+        }
+
+        fn buildSignals() [signal_count]abi.SignalDescriptor {
+            var result: [signal_count]abi.SignalDescriptor = undefined;
+            var argument_index: usize = 0;
+            if (!@hasDecl(Script, "signals")) return result;
+            inline for (@typeInfo(@TypeOf(Script.signals)).@"struct".fields, 0..) |signal_field, signal_index| {
+                const declaration = @field(Script.signals, signal_field.name);
+                const argument_count = @typeInfo(@TypeOf(@TypeOf(declaration).arguments)).@"struct".fields.len;
+                result[signal_index] = .{
+                    .name = .from(signal_field.name),
+                    .arguments = if (argument_count == 0) null else signal_arguments[argument_index..].ptr,
+                    .argument_count = argument_count,
+                };
+                argument_index += argument_count;
             }
             return result;
         }
@@ -177,6 +238,8 @@ pub fn ScriptAdapter(comptime Script: type) type {
             .method_count = method_count,
             .properties = if (export_count == 0) null else &property_descriptors,
             .property_count = export_count,
+            .signals = if (signal_count == 0) null else &signal_descriptors,
+            .signal_count = signal_count,
             .create_instance = create,
             .destroy_instance = destroy,
             .call_method = call,

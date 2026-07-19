@@ -72,7 +72,7 @@ pub fn init(ctx: gd.InitContext) !Self {
 }
 
 pub fn _ready(self: *Self) !void {
-    _ = self;
+    try self.base.set_position(.{ .x = 12.0, .y = 34.0 });
     gd.log.info("ready", .{});
 }
 
@@ -83,6 +83,18 @@ pub fn _process(self: *Self, delta: f64) !void {
 
 Only fields listed in `exports` are visible to Godot. Exported fields must have defaults. The MVP supports `bool`, integer types, `f32`, `f64`, `[]const u8`, and `gd.Vector2` descriptor types. The bundled templates currently cover `Node`, `Node2D`, `Sprite2D`, and `Control`.
 
+Signals use named, typed arguments and are emitted through the base object:
+
+```zig
+pub const signals = .{
+    .started = gd.signal(.{}),
+    .position_changed = gd.signal(.{ .position = gd.Vector2 }),
+};
+
+try self.base.emit_signal("started", .{});
+try self.base.emit_signal("position_changed", .{position});
+```
+
 `gd.Node2D` and `gd.Sprite2D` provide typed `set_position` and `get_position` methods. Use `gd.Object.call` as the fallback for Godot methods that do not have typed wrappers yet. Export additions and removals refresh the selected node's Inspector after a successful save.
 
 ## Tests
@@ -91,7 +103,7 @@ Only fields listed in `exports` are visible to Godot. Exported fields must have 
 sh tests/run.sh
 ```
 
-This runs Zig reflection tests, a headless lifecycle/property integration test, invalid-source handling, and a headless editor startup check.
+This runs Zig reflection tests, headless lifecycle/property and save integration tests, invalid-source handling, and editor language/export refresh checks.
 
 ## MVP limitations
 

@@ -1,4 +1,4 @@
-pub const abi_version: u32 = 1;
+pub const abi_version: u32 = 2;
 
 pub const StringView = extern struct {
     ptr: [*]const u8,
@@ -70,12 +70,24 @@ pub const PropertyDescriptor = extern struct {
     default_value: Value,
 };
 
+pub const SignalArgumentDescriptor = extern struct {
+    name: StringView,
+    type: ValueType,
+};
+
+pub const SignalDescriptor = extern struct {
+    name: StringView,
+    arguments: ?[*]const SignalArgumentDescriptor,
+    argument_count: u32,
+};
+
 pub const EngineApi = extern struct {
     abi_version: u32,
     struct_size: u32,
     log_info: *const fn (StringView) callconv(.c) void,
     log_error: *const fn (StringView) callconv(.c) void,
     object_call: *const fn (u64, StringView, ?[*]const Value, u32, *Value) callconv(.c) Status,
+    object_emit_signal: *const fn (u64, StringView, ?[*]const Value, u32) callconv(.c) Status,
 };
 
 pub const ScriptDescriptor = extern struct {
@@ -86,6 +98,8 @@ pub const ScriptDescriptor = extern struct {
     method_count: u32,
     properties: ?[*]const PropertyDescriptor,
     property_count: u32,
+    signals: ?[*]const SignalDescriptor,
+    signal_count: u32,
     create_instance: *const fn (u64, *?*anyopaque) callconv(.c) Status,
     destroy_instance: *const fn (?*anyopaque) callconv(.c) void,
     call_method: *const fn (?*anyopaque, StringView, ?[*]const Value, u32, *Value) callconv(.c) Status,

@@ -99,8 +99,24 @@ GzStatus object_call(uint64_t object_id, GzStringView method,
   return GZ_STATUS_OK;
 }
 
+GzStatus object_emit_signal(uint64_t object_id, GzStringView signal,
+                            const GzValue *arguments, uint32_t argument_count) {
+  Object *object = ObjectDB::get_instance(object_id);
+  if (!object || (argument_count > 0 && !arguments))
+    return GZ_STATUS_INVALID_ARGUMENT;
+  Array args;
+  args.push_back(StringName(from_view(signal)));
+  for (uint32_t i = 0; i < argument_count; ++i)
+    args.push_back(to_variant(arguments[i]));
+  Variant result = object->callv("emit_signal", args);
+  return static_cast<Error>(static_cast<int64_t>(result)) == OK
+             ? GZ_STATUS_OK
+             : GZ_STATUS_SCRIPT_ERROR;
+}
+
 const GzEngineApi engine_api = {
-    GZSCRIPT_ABI_VERSION, sizeof(GzEngineApi), log_info, log_error, object_call,
+    GZSCRIPT_ABI_VERSION, sizeof(GzEngineApi), log_info, log_error,
+    object_call,          object_emit_signal,
 };
 } // namespace
 

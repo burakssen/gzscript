@@ -111,6 +111,16 @@ Variant::Type variant_type(uint32_t type) {
   }
 }
 
+MethodInfo signal_method_info(const GzSignalDescriptor &signal) {
+  MethodInfo result(StringName(view_string(signal.name)));
+  for (uint32_t i = 0; i < signal.argument_count; ++i) {
+    const GzSignalArgumentDescriptor &argument = signal.arguments[i];
+    result.arguments.push_back(PropertyInfo(
+        variant_type(argument.type), StringName(view_string(argument.name))));
+  }
+  return result;
+}
+
 void append_properties(List<PropertyInfo> &result,
                        const GzScriptDescriptor *descriptor) {
   for (uint32_t i = 0; i < descriptor->property_count; ++i) {
@@ -428,8 +438,25 @@ bool GzScript::_is_abstract() const { return false; }
 ScriptLanguage *GzScript::_get_language() const {
   return GzLanguage::get_singleton();
 }
-bool GzScript::_has_script_signal(const StringName &) const { return false; }
-TypedArray<Dictionary> GzScript::_get_script_signal_list() const { return {}; }
+bool GzScript::_has_script_signal(const StringName &signal) const {
+  if (!module)
+    return false;
+  const GzScriptDescriptor *descriptor = module->get_descriptor();
+  for (uint32_t i = 0; i < descriptor->signal_count; ++i)
+    if (StringName(view_string(descriptor->signals[i].name)) == signal)
+      return true;
+  return false;
+}
+
+TypedArray<Dictionary> GzScript::_get_script_signal_list() const {
+  TypedArray<Dictionary> result;
+  if (!module)
+    return result;
+  const GzScriptDescriptor *descriptor = module->get_descriptor();
+  for (uint32_t i = 0; i < descriptor->signal_count; ++i)
+    result.push_back(Dictionary(signal_method_info(descriptor->signals[i])));
+  return result;
+}
 
 bool GzScript::_has_property_default_value(const StringName &property) const {
   if (!module)

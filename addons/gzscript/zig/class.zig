@@ -8,6 +8,10 @@ const methods = struct {
         return .{ .owner = self.owner };
     }
 
+    fn emitSignal(self: anytype, name: []const u8, arguments: anytype) !void {
+        try object(self).emit_signal(name, arguments);
+    }
+
     fn setPosition(self: anytype, position: Vector2) !void {
         const arguments = [_]abi.Value{.{
             .type = .vector2,
@@ -28,6 +32,7 @@ fn ObjectClass(comptime class_name: []const u8) type {
         owner: u64,
 
         pub const godot_class = class_name;
+        pub const emit_signal = methods.emitSignal;
     };
 }
 
@@ -36,6 +41,7 @@ fn Node2DClass(comptime class_name: []const u8) type {
         owner: u64,
 
         pub const godot_class = class_name;
+        pub const emit_signal = methods.emitSignal;
         pub const set_position = methods.setPosition;
         pub const get_position = methods.getPosition;
     };
