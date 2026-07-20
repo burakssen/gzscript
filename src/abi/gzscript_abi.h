@@ -56,6 +56,21 @@ typedef struct {
   GzValueData data;
 } GzValue;
 
+#ifdef __cplusplus
+static_assert(GZ_VALUE_NIL == 0 && GZ_VALUE_OBJECT == 6,
+              "GzValueType ordinals are part of the ABI");
+static_assert(sizeof(void *) == 8, "gzscript supports 64-bit targets only");
+static_assert(sizeof(GzStringView) == 16 && alignof(GzStringView) == 8,
+              "Unexpected GzStringView ABI layout");
+static_assert(sizeof(GzVector2) == 16 && alignof(GzVector2) == 8,
+              "Unexpected GzVector2 ABI layout");
+static_assert(sizeof(GzValueData) == 16 && alignof(GzValueData) == 8,
+              "Unexpected GzValueData ABI layout");
+static_assert(sizeof(GzValue) == 24 && alignof(GzValue) == 8 &&
+                  offsetof(GzValue, data) == 8,
+              "Unexpected GzValue ABI layout");
+#endif
+
 typedef enum {
   GZ_PROPERTY_HINT_NONE = 0,
   GZ_PROPERTY_HINT_RANGE = 1,
@@ -101,6 +116,12 @@ typedef struct {
                                  const GzValue *arguments,
                                  uint32_t argument_count);
 } GzEngineApi;
+
+#ifdef __cplusplus
+static_assert(sizeof(GzEngineApi) == 40 && alignof(GzEngineApi) == 8 &&
+                  offsetof(GzEngineApi, object_call) == 24,
+              "Unexpected GzEngineApi ABI layout");
+#endif
 
 typedef GzStatus (*GzCreateInstance)(uint64_t owner_id, void **instance);
 typedef void (*GzDestroyInstance)(void *instance);

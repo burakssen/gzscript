@@ -21,6 +21,10 @@ Ref<GzResourceSaver> resource_saver;
 } // namespace
 
 void initialize_gzscript_module(ModuleInitializationLevel level) {
+  if (level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+    return;
+  }
+
   if (level != MODULE_INITIALIZATION_LEVEL_SCENE) {
     return;
   }
@@ -41,10 +45,14 @@ void initialize_gzscript_module(ModuleInitializationLevel level) {
   ResourceLoader::get_singleton()->add_resource_format_loader(resource_loader,
                                                               true);
   ResourceSaver::get_singleton()->add_resource_format_saver(resource_saver,
-                                                            true);
+                                                             true);
 }
 
 void uninitialize_gzscript_module(ModuleInitializationLevel level) {
+  if (level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+    return;
+  }
+
   if (level != MODULE_INITIALIZATION_LEVEL_SCENE) {
     return;
   }

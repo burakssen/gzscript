@@ -10,6 +10,9 @@
 #include <dlfcn.h>
 #endif
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
 
 using namespace godot;
 
@@ -88,19 +91,72 @@ void log_error(GzStringView message) {
   UtilityFunctions::printerr(from_view(message));
 }
 
+// ponytail: thread-local StringName cache to eliminate string pool lookups per call
+static thread_local std::unordered_map<std::string_view, StringName> method_name_cache;
+
+StringName get_cached_name(GzStringView view) {
+  std::string_view sv(view.ptr, view.len);
+  auto it = method_name_cache.find(sv);
+  if (it != method_name_cache.end()) {
+    return it->second;
+  }
+  StringName name(from_view(view));
+  method_name_cache.emplace(sv, name);
+  return name;
+}
+
 GzStatus object_call(uint64_t object_id, GzStringView method,
                      const GzValue *arguments, uint32_t argument_count,
                      GzValue *result) {
   Object *object = ObjectDB::get_instance(object_id);
-  if (!object || !result) {
+  if (!object || !result || (argument_count > 0 && !arguments)) {
     return GZ_STATUS_INVALID_ARGUMENT;
   }
-  Array args;
-  for (uint32_t i = 0; i < argument_count; ++i) {
-    args.push_back(to_variant(arguments[i]));
+
+  // ponytail: stack-allocate argument buffers up to 8 parameters to eliminate heap allocation
+  constexpr uint32_t STACK_LIMIT = 8;
+  Variant stack_values[STACK_LIMIT];
+  const Variant *stack_pointers[STACK_LIMIT];
+
+  std::vector<Variant> heap_values;
+  std::vector<const Variant *> heap_pointers;
+
+  Variant *values_ptr = stack_values;
+  const Variant **pointers_ptr = stack_pointers;
+
+  if (argument_count > STACK_LIMIT) {
+    heap_values.resize(argument_count);
+    heap_pointers.resize(argument_count);
+    values_ptr = heap_values.data();
+    pointers_ptr = heap_pointers.data();
   }
-  *result = from_variant(object->callv(StringName(from_view(method)), args));
-  return GZ_STATUS_OK;
+
+  for (uint32_t i = 0; i < argument_count; ++i) {
+    values_ptr[i] = to_variant(arguments[i]);
+    pointers_ptr[i] = &values_ptr[i];
+  }
+
+  Variant receiver = object;
+  Variant call_result;
+  GDExtensionCallError call_error{};
+  receiver.callp(get_cached_name(method),
+                 argument_count == 0 ? nullptr : pointers_ptr,
+                 static_cast<int>(argument_count), call_result, call_error);
+  switch (call_error.error) {
+  case GDEXTENSION_CALL_OK:
+    *result = from_variant(call_result);
+    return GZ_STATUS_OK;
+  case GDEXTENSION_CALL_ERROR_INVALID_METHOD:
+    return GZ_STATUS_METHOD_NOT_FOUND;
+  case GDEXTENSION_CALL_ERROR_INVALID_ARGUMENT:
+    return GZ_STATUS_TYPE_MISMATCH;
+  case GDEXTENSION_CALL_ERROR_TOO_MANY_ARGUMENTS:
+  case GDEXTENSION_CALL_ERROR_TOO_FEW_ARGUMENTS:
+  case GDEXTENSION_CALL_ERROR_INSTANCE_IS_NULL:
+    return GZ_STATUS_INVALID_ARGUMENT;
+  default:
+    return GZ_STATUS_SCRIPT_ERROR;
+  }
 }
 
 GzStatus object_emit_signal(uint64_t object_id, GzStringView signal,
@@ -108,10 +164,12 @@ GzStatus object_emit_signal(uint64_t object_id, GzStringView signal,
   Object *object = ObjectDB::get_instance(object_id);
   if (!object || (argument_count > 0 && !arguments))
     return GZ_STATUS_INVALID_ARGUMENT;
+
   Array args;
-  args.push_back(StringName(from_view(signal)));
+  args.push_back(get_cached_name(signal));
   for (uint32_t i = 0; i < argument_count; ++i)
     args.push_back(to_variant(arguments[i]));
+
   Variant result = object->callv("emit_signal", args);
   return static_cast<Error>(static_cast<int64_t>(result)) == OK
              ? GZ_STATUS_OK
@@ -194,5 +252,11 @@ std::shared_ptr<GzCompiledModule> GzCompiledModule::load(const String &p_path,
   module->handle = handle;
   module->descriptor = descriptor;
   module->path = p_path;
+
+  // ponytail: pre-cache StringName for all properties to speed up instance_set and instance_get
+  for (uint32_t i = 0; i < descriptor->property_count; ++i) {
+    module->property_names.push_back(StringName(from_view(descriptor->properties[i].name)));
+  }
+
   return module;
 }

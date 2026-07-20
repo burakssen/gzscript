@@ -19,31 +19,10 @@ GzBuildManager *GzBuildManager::singleton = nullptr;
 namespace {
 constexpr const char *ZIG_PATH_SETTING = "gzscript/compiler/zig_path";
 
+
 String zig_path(const String &relative) {
   return ProjectSettings::get_singleton()->globalize_path(
       "res://addons/gzscript/zig/" + relative);
-}
-
-String zig_executable() {
-  ProjectSettings *settings = ProjectSettings::get_singleton();
-  String configured = settings->get_setting(ZIG_PATH_SETTING, String());
-  if (!configured.is_empty()) {
-    return configured;
-  }
-
-  OS *os = OS::get_singleton();
-  String from_environment = os->get_environment("GZSCRIPT_ZIG_PATH");
-  if (!from_environment.is_empty()) {
-    return from_environment;
-  }
-
-  String home = os->get_environment("HOME");
-  if (home.is_empty())
-    home = os->get_environment("USERPROFILE");
-  String executable = os->get_name() == "Windows" ? "zig.exe" : "zig";
-  String zvm_path = home.path_join(".zvm/bin").path_join(executable);
-  return !home.is_empty() && FileAccess::file_exists(zvm_path) ? zvm_path
-                                                               : executable;
 }
 
 bool write_text(const String &path, const String &contents) {
@@ -73,6 +52,34 @@ String module_extension(const String &platform) {
 }
 } // namespace
 
+String GzBuildManager::get_zig_executable() {
+  ProjectSettings *settings = ProjectSettings::get_singleton();
+  if (settings && settings->has_setting(ZIG_PATH_SETTING)) {
+    String configured = settings->get_setting(ZIG_PATH_SETTING, String());
+    if (!configured.is_empty()) {
+      return configured;
+    }
+  }
+
+  OS *os = OS::get_singleton();
+  if (os) {
+    String from_environment = os->get_environment("GZSCRIPT_ZIG_PATH");
+    if (!from_environment.is_empty()) {
+      return from_environment;
+    }
+
+    String home = os->get_environment("HOME");
+    if (home.is_empty())
+      home = os->get_environment("USERPROFILE");
+    String executable = os->get_name() == "Windows" ? "zig.exe" : "zig";
+    String zvm_path = home.path_join(".zvm/bin").path_join(executable);
+    if (!home.is_empty() && FileAccess::file_exists(zvm_path))
+      return zvm_path;
+    return executable;
+  }
+  return "zig";
+}
+
 void GzBuildManager::_bind_methods() {
   ClassDB::bind_method(D_METHOD("compile_path", "resource_path"),
                        &GzBuildManager::compile_path);
@@ -92,12 +99,13 @@ GzBuildManager::GzBuildManager() {
   settings->set_initial_value(ZIG_PATH_SETTING, String());
   settings->set_as_basic(ZIG_PATH_SETTING, true);
 
-  Dictionary property_info;
-  property_info["name"] = ZIG_PATH_SETTING;
-  property_info["type"] = Variant::STRING;
-  property_info["hint"] = PROPERTY_HINT_GLOBAL_FILE;
-  settings->add_property_info(property_info);
+  Dictionary zig_property_info;
+  zig_property_info["name"] = ZIG_PATH_SETTING;
+  zig_property_info["type"] = Variant::STRING;
+  zig_property_info["hint"] = PROPERTY_HINT_GLOBAL_FILE;
+  settings->add_property_info(zig_property_info);
 }
+
 
 GzBuildManager::~GzBuildManager() {
   if (singleton == this) {
@@ -125,9 +133,11 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
   DirAccess::make_dir_recursive_absolute(module_directory);
 
   String sdk_fingerprint;
-  const char *sdk_files[] = {"abi.zig",   "adapter.zig",  "class.zig",
-                             "godot.zig", "property.zig", "runtime.zig",
-                             "signal.zig"};
+  const char *sdk_files[] = {
+      "abi.zig",           "adapter.zig", "class.zig",
+      "class_support.zig", "codec.zig",   "godot.zig",
+      "property.zig",      "runtime.zig", "signal.zig",
+  };
   for (const char *file : sdk_files)
     sdk_fingerprint += FileAccess::get_file_as_string(
         "res://addons/gzscript/zig/" + String(file));
@@ -179,7 +189,7 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
     arguments.push_back("-Mgodot=" + zig_path("godot.zig"));
 
     Array output_lines;
-    int exit_code = OS::get_singleton()->execute(zig_executable(), arguments,
+    int exit_code = OS::get_singleton()->execute(get_zig_executable(), arguments,
                                                  output_lines, true);
     last_diagnostics =
         output_lines.is_empty() ? String() : String(output_lines[0]);

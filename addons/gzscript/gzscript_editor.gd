@@ -11,16 +11,36 @@ func _enter_tree() -> void:
 	rebuild_timer.wait_time = 0.2
 	rebuild_timer.timeout.connect(_rebuild_loaded_scripts)
 	add_child(rebuild_timer)
-	get_editor_interface().get_resource_filesystem().filesystem_changed.connect(_queue_rebuild)
-	GzBuildManager.script_compiled.connect(_queue_inspector_refresh)
+
+	if Engine.has_singleton("EditorInterface"):
+		var ei = Engine.get_singleton("EditorInterface")
+		if ei != null:
+			var fs = ei.get_resource_filesystem()
+			if fs != null:
+				fs.filesystem_changed.connect(_queue_rebuild)
+
+	if GzBuildManager != null:
+		GzBuildManager.script_compiled.connect(_queue_inspector_refresh)
 
 
 func _exit_tree() -> void:
-	var filesystem := get_editor_interface().get_resource_filesystem()
-	if filesystem.filesystem_changed.is_connected(_queue_rebuild):
-		filesystem.filesystem_changed.disconnect(_queue_rebuild)
-	if GzBuildManager.script_compiled.is_connected(_queue_inspector_refresh):
+	if Engine.has_singleton("EditorInterface"):
+		var ei = Engine.get_singleton("EditorInterface")
+		if ei != null:
+			var fs = ei.get_resource_filesystem()
+			if fs != null and fs.filesystem_changed.is_connected(_queue_rebuild):
+				fs.filesystem_changed.disconnect(_queue_rebuild)
+
+	if GzBuildManager != null and GzBuildManager.script_compiled.is_connected(_queue_inspector_refresh):
 		GzBuildManager.script_compiled.disconnect(_queue_inspector_refresh)
+
+
+func _get_script_editor() -> ScriptEditor:
+	if Engine.has_singleton("EditorInterface"):
+		var ei = Engine.get_singleton("EditorInterface")
+		if ei != null:
+			return ei.get_script_editor()
+	return null
 
 
 func _queue_rebuild() -> void:
@@ -36,10 +56,14 @@ func _queue_inspector_refresh() -> void:
 
 func _refresh_inspector() -> void:
 	inspector_refresh_queued = false
-	var inspector := get_editor_interface().get_inspector()
-	var edited_object := inspector.get_edited_object()
-	if edited_object != null and edited_object.get_script() is GzScript:
-		inspector.edit(edited_object)
+	if Engine.has_singleton("EditorInterface"):
+		var ei = Engine.get_singleton("EditorInterface")
+		if ei != null:
+			var inspector = ei.get_inspector()
+			if inspector != null:
+				var edited_object = inspector.get_edited_object()
+				if edited_object != null and edited_object.get_script() is GzScript:
+					inspector.edit(edited_object)
 
 
 func _rebuild_loaded_scripts() -> void:

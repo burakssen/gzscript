@@ -2,7 +2,8 @@
 
 #include <godot_cpp/classes/script_language_extension.hpp>
 
-class GzLanguage : public godot::ScriptLanguageExtension {
+class GzLanguage : public godot::ScriptLanguageExtension
+{
   GDCLASS(GzLanguage, godot::ScriptLanguageExtension)
 
   static GzLanguage *singleton;
@@ -23,6 +24,7 @@ public:
   godot::PackedStringArray _get_reserved_words() const override;
   bool _is_control_flow_keyword(const godot::String &keyword) const override;
   godot::PackedStringArray _get_comment_delimiters() const override;
+  godot::PackedStringArray _get_doc_comment_delimiters() const override;
   godot::PackedStringArray _get_string_delimiters() const override;
   godot::Ref<godot::Script>
   _make_template(const godot::String &template_name,
@@ -33,7 +35,8 @@ public:
   bool _is_using_templates() override;
   godot::Dictionary _validate(const godot::String &script,
                               const godot::String &path,
-                              bool validate_functions, bool validate_errors,
+                              bool validate_functions,
+                              bool validate_errors,
                               bool validate_warnings,
                               bool validate_safe_lines) const override;
   godot::String _validate_path(const godot::String &path) const override;

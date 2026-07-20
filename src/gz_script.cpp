@@ -142,11 +142,12 @@ void append_properties(List<PropertyInfo> &result,
   }
 }
 
+// ponytail: use pre-cached StringName vector for property lookup without allocations
 int property_index(InstanceData *data, const StringName &name) {
-  const GzScriptDescriptor *descriptor = data->module->get_descriptor();
-  for (uint32_t i = 0; i < descriptor->property_count; ++i) {
-    if (StringName(view_string(descriptor->properties[i].name)) == name)
-      return i;
+  const auto &prop_names = data->module->get_property_names();
+  for (size_t i = 0; i < prop_names.size(); ++i) {
+    if (prop_names[i] == name)
+      return static_cast<int>(i);
   }
   return -1;
 }

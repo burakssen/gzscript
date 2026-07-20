@@ -20,6 +20,8 @@ public:
   ~GzBuildManager();
 
   static GzBuildManager *get_singleton() { return singleton; }
+  static godot::String get_zig_executable();
+
   std::shared_ptr<GzCompiledModule> compile(const godot::String &resource_path,
                                             const godot::String &source);
   bool compile_path(const godot::String &resource_path);
