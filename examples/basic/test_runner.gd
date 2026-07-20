@@ -50,6 +50,8 @@ func _ready() -> void:
 			instance_property_names.push_back(property.name)
 	assert(instance_property_names == [&"amplitude", &"speed"])
 	assert(player.position.is_equal_approx(Vector2(12.0, 34.0)))
+	assert(is_equal_approx(player.rotation, 0.5))
+	assert(player.scale.is_equal_approx(Vector2(2.0, 3.0)))
 	assert(zig_ready_count == 1)
 	assert(reported_position.is_equal_approx(Vector2(12.0, 34.0)))
 	assert(is_equal_approx(player.get("amplitude"), 10.0))

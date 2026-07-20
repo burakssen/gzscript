@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-uvx --from scons scons platform=macos target=template_debug arch=arm64 -j8
+scons platform=macos target=template_debug arch=arm64 -j8
+python3 -m unittest tests/test_generate_bindings.py
+zig fmt --check addons/gzscript/zig examples/basic/scripts addons/gzscript/templates tests
 zig test --dep godot -Mroot=tests/zig_adapter_test.zig -Mgodot=addons/gzscript/zig/godot.zig
 
 zig_executable=$(command -v zig)
@@ -14,8 +16,10 @@ run_godot() {
 }
 
 run_godot
+run_godot --script tests/live_bindings_runner.gd
 run_godot --script tests/save_runner.gd
 run_godot --script tests/failure_runner.gd
+run_godot --script tests/benchmark_runner.gd
 
 editor_output=$(run_godot --editor --script tests/language_runner.gd 2>&1)
 rm -f .godot/gzscript/editor_test.zig .godot/gzscript/editor_test.zig.uid

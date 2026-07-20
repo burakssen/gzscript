@@ -1,6 +1,26 @@
 const std = @import("std");
 const gd = @import("godot");
 
+const TestObject = extern struct {
+    owner: u64,
+
+    pub const godot_class = "TestObject";
+};
+
+const OwnerOnly = extern struct {
+    owner: u64,
+};
+
+fn discardLog(_: gd.abi.StringView) callconv(.c) void {}
+
+fn missingMethodCall(_: u64, _: gd.abi.StringView, _: ?[*]const gd.abi.Value, _: u32, _: *gd.abi.Value) callconv(.c) gd.abi.Status {
+    return .method_not_found;
+}
+
+fn discardSignal(_: u64, _: gd.abi.StringView, _: ?[*]const gd.abi.Value, _: u32) callconv(.c) gd.abi.Status {
+    return .ok;
+}
+
 const TestScript = struct {
     pub const Base = gd.Node2D;
     const Self = @This();
@@ -46,30 +66,208 @@ test "adapter reflects signal declarations" {
 }
 
 test "2D wrappers expose typed position methods" {
-    try std.testing.expect(@hasDecl(gd.Node2D, "set_position"));
-    try std.testing.expect(@hasDecl(gd.Node2D, "get_position"));
-    try std.testing.expect(@hasDecl(gd.Sprite2D, "set_position"));
-    try std.testing.expect(@hasDecl(gd.Sprite2D, "get_position"));
+    try std.testing.expect(@hasDecl(gd.Node2D, "setPosition"));
+    try std.testing.expect(@hasDecl(gd.Node2D, "getPosition"));
+    try std.testing.expect(@hasDecl(gd.Sprite2D, "setPosition"));
+    try std.testing.expect(@hasDecl(gd.Sprite2D, "getPosition"));
+}
+
+test "ABI v2 layouts remain stable" {
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.StringView));
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.Vector2));
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.ValueData));
+    try std.testing.expectEqual(@as(usize, 24), @sizeOf(gd.abi.Value));
+    try std.testing.expectEqual(@as(usize, 40), @sizeOf(gd.abi.EngineApi));
+    try std.testing.expectEqual(@as(usize, 8), @alignOf(gd.abi.Value));
+    try std.testing.expectEqual(@as(usize, 8), @offsetOf(gd.abi.Value, "data"));
+}
+
+test "shared codec supports objects and nullable objects" {
+    try std.testing.expect(gd.codec.isObjectType(TestObject));
+    try std.testing.expect(!gd.codec.isObjectType(OwnerOnly));
+    const object = TestObject{ .owner = 42 };
+    const encoded = gd.codec.toValue(object);
+    try std.testing.expectEqual(gd.abi.ValueType.object, encoded.type);
+    try std.testing.expectEqual(@as(u64, 42), encoded.data.object_id);
+
+    const decoded = try gd.codec.fromValue(TestObject, &encoded);
+    try std.testing.expectEqual(@as(u64, 42), decoded.owner);
+
+    const nil_object = gd.abi.Value{ .type = .object, .data = .{ .object_id = 0 } };
+    try std.testing.expectEqual(@as(?TestObject, null), try gd.codec.fromValue(?TestObject, &nil_object));
+}
+
+test "shared codec round-trips ABI v2 value types" {
+    const boolean = gd.codec.toValue(true);
+    try std.testing.expect(try gd.codec.fromValue(bool, &boolean));
+
+    const integer = gd.codec.toValue(@as(i32, -42));
+    try std.testing.expectEqual(@as(i32, -42), try gd.codec.fromValue(i32, &integer));
+
+    const floating = gd.codec.toValue(@as(f32, 1.5));
+    try std.testing.expectEqual(@as(f32, 1.5), try gd.codec.fromValue(f32, &floating));
+
+    const string = gd.codec.toValue(@as([]const u8, "zig"));
+    try std.testing.expectEqualStrings("zig", try gd.codec.fromValue([]const u8, &string));
+
+    const vector = gd.codec.toValue(gd.Vector2{ .x = 3.0, .y = 4.0 });
+    try std.testing.expectEqual(
+        gd.Vector2{ .x = 3.0, .y = 4.0 },
+        try gd.codec.fromValue(gd.Vector2, &vector),
+    );
+
+    const absent = gd.codec.toValue(@as(?TestObject, null));
+    try std.testing.expectEqual(gd.abi.ValueType.nil, absent.type);
+}
+
+test "shared codec rejects integer overflow" {
+    const encoded = gd.abi.Value{ .type = .integer, .data = .{ .integer = 256 } };
+    try std.testing.expectError(error.IntegerOverflow, gd.codec.fromValue(u8, &encoded));
+}
+
+test "runtime preserves engine call errors" {
+    const api = gd.abi.EngineApi{
+        .abi_version = gd.abi.abi_version,
+        .struct_size = @sizeOf(gd.abi.EngineApi),
+        .log_info = discardLog,
+        .log_error = discardLog,
+        .object_call = missingMethodCall,
+        .object_emit_signal = discardSignal,
+    };
+    var descriptor: *const gd.abi.ScriptDescriptor = undefined;
+    try std.testing.expectEqual(
+        gd.abi.Status.ok,
+        gd.initialize(&api, &descriptor, &gd.ScriptAdapter(TestScript).descriptor),
+    );
+    try std.testing.expectError(
+        error.MethodNotFound,
+        (gd.Object{ .owner = 42 }).call("missing", &.{}),
+    );
+}
+
+test "Node2D wrappers expose supported Godot 4.7 methods" {
+    inline for (.{
+        "setPosition",
+        "setRotation",
+        "setRotationDegrees",
+        "setSkew",
+        "setScale",
+        "getPosition",
+        "getRotation",
+        "getRotationDegrees",
+        "getSkew",
+        "getScale",
+        "rotate",
+        "moveLocalX",
+        "moveLocalY",
+        "translate",
+        "globalTranslate",
+        "applyScale",
+        "setGlobalPosition",
+        "getGlobalPosition",
+        "setGlobalRotation",
+        "setGlobalRotationDegrees",
+        "getGlobalRotation",
+        "getGlobalRotationDegrees",
+        "setGlobalSkew",
+        "getGlobalSkew",
+        "setGlobalScale",
+        "getGlobalScale",
+        "lookAt",
+        "getAngleTo",
+        "toLocal",
+        "toGlobal",
+    }) |method| {
+        try std.testing.expect(@hasDecl(gd.Node2D, method));
+        try std.testing.expect(@hasDecl(gd.Sprite2D, method));
+    }
+    try std.testing.expect(!@hasDecl(gd.Node2D, "setTransform"));
+}
+
+test "scene and UI wrappers expose selected ABI v2 methods" {
+    inline for (.{ gd.Node, gd.CanvasItem, gd.Control, gd.Node2D, gd.Sprite2D, gd.Node3D }) |Class| {
+        try std.testing.expect(@hasDecl(Class, "getParent"));
+        try std.testing.expect(@hasDecl(Class, "isInsideTree"));
+    }
+    inline for (.{ gd.CanvasItem, gd.Control, gd.Node2D, gd.Sprite2D }) |Class| {
+        try std.testing.expect(@hasDecl(Class, "setVisible"));
+        try std.testing.expect(@hasDecl(Class, "getVisibilityLayerBit"));
+    }
+    try std.testing.expect(@hasDecl(gd.Control, "setPosition"));
+    try std.testing.expect(@hasDecl(gd.Control, "findValidFocusNeighbor"));
+    try std.testing.expect(@hasDecl(gd.Sprite2D, "setCentered"));
+    try std.testing.expect(@hasDecl(gd.Sprite2D, "getTexture"));
+    try std.testing.expect(@hasDecl(gd.Node3D, "setRotationOrder"));
+    try std.testing.expect(@hasDecl(gd.Node3D, "rotateX"));
+    try std.testing.expect(!@hasDecl(gd.Node3D, "setPosition"));
+    try std.testing.expect(!@hasDecl(gd.Texture2D, "setTexture"));
+}
+
+test "generated upcasts preserve object identity" {
+    const control = gd.Control{ .owner = 41 };
+    try std.testing.expectEqual(control.owner, control.asCanvasItem().owner);
+    try std.testing.expectEqual(control.owner, control.asNode().owner);
+
+    const sprite = gd.Sprite2D{ .owner = 42 };
+    try std.testing.expectEqual(sprite.owner, sprite.asNode2D().owner);
+    try std.testing.expectEqual(sprite.owner, sprite.asCanvasItem().owner);
+    try std.testing.expectEqual(sprite.owner, sprite.asNode().owner);
+
+    const node3d = gd.Node3D{ .owner = 43 };
+    try std.testing.expectEqual(node3d.owner, node3d.asNode().owner);
+}
+
+test "generated tagged enums preserve Godot values" {
+    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Side.side_left));
+    try std.testing.expectEqual(@as(i64, 3), @intFromEnum(gd.Side.side_bottom));
+    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.EulerOrder.euler_order_xyz));
+    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Node.ProcessMode.process_mode_inherit));
+    try std.testing.expectEqual(@as(i64, 8), @intFromEnum(gd.Control.LayoutPreset.preset_center));
+    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Node3D.RotationEditMode.rotation_edit_mode_euler));
+    try std.testing.expectEqual(
+        gd.Control.LayoutDirection.layout_direction_application_locale,
+        gd.Control.LayoutDirection.layout_direction_locale,
+    );
+}
+
+test "shared codec safely round-trips generated enums" {
+    const order = gd.EulerOrder.euler_order_zyx;
+    const encoded_order = gd.codec.toValue(order);
+    try std.testing.expectEqual(gd.abi.ValueType.integer, encoded_order.type);
+    try std.testing.expectEqual(order, try gd.codec.fromValue(gd.EulerOrder, &encoded_order));
+
+    const combined_flags: gd.Control.SizeFlags = @enumFromInt(5);
+    const encoded_flags = gd.codec.toValue(combined_flags);
+    try std.testing.expectEqual(combined_flags, try gd.codec.fromValue(gd.Control.SizeFlags, &encoded_flags));
+
+    const invalid = gd.abi.Value{ .type = .integer, .data = .{ .integer = 99 } };
+    try std.testing.expectError(error.InvalidEnumValue, gd.codec.fromValue(gd.Side, &invalid));
 }
 
 test "class factories preserve identity and ABI layout" {
     comptime {
         if (gd.Node == gd.Control) @compileError("Node and Control must be distinct types");
         if (gd.Node2D == gd.Sprite2D) @compileError("Node2D and Sprite2D must be distinct types");
+        if (gd.CanvasItem == gd.Node2D) @compileError("CanvasItem and Node2D must be distinct types");
+        if (gd.Node == gd.Node3D) @compileError("Node and Node3D must be distinct types");
     }
 
     try std.testing.expectEqualStrings("Node", gd.Node.godot_class);
+    try std.testing.expectEqualStrings("CanvasItem", gd.CanvasItem.godot_class);
     try std.testing.expectEqualStrings("Control", gd.Control.godot_class);
     try std.testing.expectEqualStrings("Node2D", gd.Node2D.godot_class);
     try std.testing.expectEqualStrings("Sprite2D", gd.Sprite2D.godot_class);
+    try std.testing.expectEqualStrings("Node3D", gd.Node3D.godot_class);
+    try std.testing.expectEqualStrings("Texture2D", gd.Texture2D.godot_class);
+    try std.testing.expectEqualStrings("Viewport", gd.Viewport.godot_class);
+    try std.testing.expectEqualStrings("Tween", gd.Tween.godot_class);
 
-    inline for (.{ gd.Node, gd.Control, gd.Node2D, gd.Sprite2D }) |Class| {
+    inline for (.{ gd.Node, gd.CanvasItem, gd.Control, gd.Node2D, gd.Sprite2D, gd.Node3D, gd.Texture2D, gd.Viewport, gd.Tween }) |Class| {
         try std.testing.expectEqual(@sizeOf(u64), @sizeOf(Class));
         try std.testing.expectEqual(@alignOf(u64), @alignOf(Class));
         try std.testing.expectEqual(@as(usize, 0), @offsetOf(Class, "owner"));
-        try std.testing.expect(@hasDecl(Class, "emit_signal"));
+        try std.testing.expect(@hasDecl(Class, "emitSignal"));
     }
 
-    try std.testing.expect(!@hasDecl(gd.Node, "set_position"));
-    try std.testing.expect(!@hasDecl(gd.Control, "set_position"));
+    try std.testing.expect(!@hasDecl(gd.Node, "setPosition"));
 }

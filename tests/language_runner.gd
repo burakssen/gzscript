@@ -93,6 +93,29 @@ func _open_zig_script() -> void:
 		quit(1)
 		return
 	editor_interface.edit_script(script)
+	var lang = Engine.get_singleton("GzLanguage")
+	if lang != null:
+		var validation: Dictionary = lang._validate(SCRIPT_SOURCE, SCRIPT_PATH, true, true, true, true)
+		if not validation.get("valid", false):
+			push_error("GzLanguage._validate failed for valid Zig source")
+			sprite.free()
+			_cleanup()
+			quit(1)
+			return
+		var invalid_validation: Dictionary = lang._validate("pub fn foo() { var x = ; }", SCRIPT_PATH, true, true, true, true)
+		if invalid_validation.get("valid", true) or invalid_validation.get("errors", []).is_empty():
+			push_error("GzLanguage._validate failed to report syntax errors for invalid Zig source")
+			sprite.free()
+			_cleanup()
+			quit(1)
+			return
+		var completions: Dictionary = lang._complete_code(SCRIPT_SOURCE, SCRIPT_PATH, sprite)
+		if completions.get("options", []).is_empty():
+			push_error("GzLanguage._complete_code returned no completion options")
+			sprite.free()
+			_cleanup()
+			quit(1)
+			return
 	print("GZSCRIPT_LANGUAGE_OK")
 	await process_frame
 	editor_interface.inspect_object(null)
