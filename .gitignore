@@ -5,3 +5,8 @@ godot-cpp/bin/
 godot-cpp/gen/
 .godot/
 addons/gzscript/bin/
+*.pyc
+__pycache__/
+.zig-cache
+.ruff_cache
+*.uid

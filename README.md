@@ -83,7 +83,7 @@ pub fn init(ctx: gd.InitContext) !Self {
 }
 
 pub fn _ready(self: *Self) !void {
-    try self.base.set_position(.{ .x = 12.0, .y = 34.0 });
+    try self.base.setPosition(.{ .x = 12.0, .y = 34.0 });
     gd.log.info("ready", .{});
 }
 
@@ -102,11 +102,20 @@ pub const signals = .{
     .position_changed = gd.signal(.{ .position = gd.Vector2 }),
 };
 
-try self.base.emit_signal("started", .{});
-try self.base.emit_signal("position_changed", .{position});
+try self.base.emitSignal("started", .{});
+try self.base.emitSignal("position_changed", .{position});
 ```
 
-`gd.Node2D` and `gd.Sprite2D` provide typed `set_position` and `get_position` methods. Use `gd.Object.call` as the fallback for Godot methods that do not have typed wrappers yet. Export additions and removals refresh the selected node's Inspector after a successful save.
+`gd.Node2D` and `gd.Sprite2D` provide typed wrappers for the Godot 4.7 position, rotation, skew, scale, translation, look-at, and local/global point methods supported by ABI v2. Use `gd.Object.call` as the fallback for Godot methods that do not have typed wrappers yet. Dynamic calls report missing methods and invalid arguments as Zig errors. Export additions and removals refresh the selected node's Inspector after a successful save.
+
+The typed wrappers are generated from the pinned Godot API metadata and checked into the addon:
+
+```sh
+python3 tools/generate_bindings.py
+python3 tools/generate_bindings.py --check
+```
+
+`tools/bindings_profile.json` is the reviewed API allowlist. SCons regenerates the wrappers when the profile, generator, or Godot API metadata changes, and CI rejects stale generated output.
 
 ## Tests
 
@@ -121,4 +130,5 @@ This runs Zig reflection tests, headless lifecycle/property and save integration
 - Mobile and Web exports are not implemented.
 - Active instances are not migrated after recompilation.
 - Script callbacks currently cover `_ready`, `_process`, and `_physics_process`.
-- Godot API wrappers currently expose object ownership, logging, and dynamic method calls rather than generated typed methods for every engine class.
+- Generated typed methods are currently limited to the ABI v2 scalar, object ID, string-input, and `Vector2` codecs selected in `tools/bindings_profile.json`.
+- `Vector3`, transforms, colors, rectangles, arrays, dictionaries, packed arrays, `Callable`, and general `Variant` values are not yet supported by the typed ABI.
