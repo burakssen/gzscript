@@ -28,11 +28,18 @@ pub fn init(ctx: gd.InitContext) !Self {
 }
 
 pub fn _ready(self: *Self) !void {
-    try self.base.set_position(.{ .x = 12.0, .y = 34.0 });
-    const position = try self.base.get_position();
+    const object = gd.Object{ .owner = self.base.owner };
+    if (object.call("__gzscript_missing_method__", &.{})) |_| return error.ExpectedCallFailure else |_| {}
+    try self.base.setPosition(.{ .x = 12.0, .y = 34.0 });
+    try self.base.setRotation(0.5);
+    try self.base.setScale(.{ .x = 2.0, .y = 3.0 });
+    try self.base.moveLocalX(0.0, false);
+    const position = try self.base.getPosition();
     if (position.x != 12.0 or position.y != 34.0) return error.PositionMismatch;
-    try self.base.emit_signal("zig_ready", .{});
-    try self.base.emit_signal("position_changed", .{position});
+    const global_origin = try self.base.toGlobal(.{ .x = 0.0, .y = 0.0 });
+    if (global_origin.x != position.x or global_origin.y != position.y) return error.TransformMismatch;
+    try self.base.emitSignal("zig_ready", .{});
+    try self.base.emitSignal("position_changed", .{position});
     gd.log.info("Zig player ready", .{});
 }
 

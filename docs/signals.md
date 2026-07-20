@@ -36,7 +36,7 @@ bridge, which converts them to Godot `MethodInfo` and `PropertyInfo` metadata.
 Scripts emit signals through their base object:
 
 ```zig
-try self.base.emit_signal("position_changed", .{position});
+try self.base.emitSignal("position_changed", .{position});
 ```
 
 The runtime converts the argument tuple to ABI values and calls an explicit

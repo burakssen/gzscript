@@ -1,6 +1,6 @@
 const std = @import("std");
 const abi = @import("abi.zig");
-const properties = @import("property.zig");
+const codec = @import("codec.zig");
 
 pub var engine_api: ?*const abi.EngineApi = null;
 
@@ -16,20 +16,21 @@ pub const Object = struct {
         const api = engine_api orelse return error.EngineNotReady;
         var result = abi.Value{};
         const status = api.object_call(self.owner, .from(method), if (arguments.len == 0) null else arguments.ptr, @intCast(arguments.len), &result);
-        if (status != .ok) return error.CallFailed;
+        switch (status) {
+            .ok => {},
+            .invalid_argument => return error.InvalidArgument,
+            .method_not_found => return error.MethodNotFound,
+            .property_not_found => return error.PropertyNotFound,
+            .type_mismatch => return error.TypeMismatch,
+            .out_of_memory => return error.OutOfMemory,
+            .script_error => return error.ScriptError,
+            .abi_mismatch => return error.AbiMismatch,
+        }
         return result;
     }
 
-    pub fn emit_signal(self: Object, name: []const u8, arguments: anytype) !void {
-        const fields = @typeInfo(@TypeOf(arguments)).@"struct".fields;
-        var values: [fields.len]abi.Value = undefined;
-        inline for (fields, 0..) |field, index| {
-            const value = @field(arguments, field.name);
-            values[index] = if (@typeInfo(@TypeOf(value)) == .@"struct" and @hasField(@TypeOf(value), "owner"))
-                .{ .type = .object, .data = .{ .object_id = value.owner } }
-            else
-                properties.toValue(value);
-        }
+    pub fn emitSignal(self: Object, name: []const u8, arguments: anytype) !void {
+        const values = codec.arguments(arguments);
         const api = engine_api orelse return error.EngineNotReady;
         const status = api.object_emit_signal(self.owner, .from(name), if (values.len == 0) null else &values, values.len);
         if (status != .ok) return error.EmitSignalFailed;

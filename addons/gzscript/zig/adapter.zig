@@ -1,5 +1,6 @@
 const std = @import("std");
 const abi = @import("abi.zig");
+const codec = @import("codec.zig");
 const properties = @import("property.zig");
 const runtime = @import("runtime.zig");
 
@@ -32,10 +33,7 @@ fn signalArgumentCount(comptime T: type) usize {
 }
 
 fn signalValueType(comptime T: type) abi.ValueType {
-    return if (@typeInfo(T) == .@"struct" and @hasField(T, "owner"))
-        .object
-    else
-        properties.valueType(T);
+    return codec.valueType(T);
 }
 
 fn invoke0(instance: anytype, comptime name: []const u8) abi.Status {
