@@ -176,6 +176,29 @@ GzStatus object_emit_signal(uint64_t object_id, GzStringView signal,
              : GZ_STATUS_SCRIPT_ERROR;
 }
 
+void *get_method_bind(GzStringView class_name, GzStringView method_name,
+                       int64_t hash) {
+  StringName c_name(from_view(class_name));
+  StringName m_name(from_view(method_name));
+  return (void *)::godot::gdextension_interface::classdb_get_method_bind(
+      c_name._native_ptr(), m_name._native_ptr(), hash);
+}
+
+GzStatus object_ptrcall(void *method_bind, uint64_t object_id,
+                        const void *const *arguments, void *result) {
+  Object *object = ObjectDB::get_instance(object_id);
+  if (!object || !method_bind) {
+    return GZ_STATUS_INVALID_ARGUMENT;
+  }
+  ::godot::gdextension_interface::object_method_bind_ptrcall(
+      (GDExtensionMethodBindPtr)method_bind,
+      object->_owner,
+      (GDExtensionConstTypePtr *)arguments,
+      (GDExtensionTypePtr)result);
+  return GZ_STATUS_OK;
+}
+
+
 void close_library(void *handle) {
 #ifdef WINDOWS_ENABLED
   FreeLibrary(reinterpret_cast<HMODULE>(handle));
@@ -212,9 +235,10 @@ GzScriptInit find_init(void *handle) {
 }
 
 const GzEngineApi engine_api = {
-    GZSCRIPT_ABI_VERSION, sizeof(GzEngineApi), log_info, log_error,
-    object_call,          object_emit_signal,
+    GZSCRIPT_ABI_VERSION, sizeof(GzEngineApi), log_info,        log_error,
+    object_call,          object_emit_signal, get_method_bind, object_ptrcall,
 };
+
 } // namespace
 
 GzCompiledModule::~GzCompiledModule() {
