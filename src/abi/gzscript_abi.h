@@ -37,8 +37,8 @@ typedef enum {
 } GzValueType;
 
 typedef struct {
-  double x;
-  double y;
+  float x;
+  float y;
 } GzVector2;
 
 typedef union {
@@ -62,7 +62,7 @@ static_assert(GZ_VALUE_NIL == 0 && GZ_VALUE_OBJECT == 6,
 static_assert(sizeof(void *) == 8, "gzscript supports 64-bit targets only");
 static_assert(sizeof(GzStringView) == 16 && alignof(GzStringView) == 8,
               "Unexpected GzStringView ABI layout");
-static_assert(sizeof(GzVector2) == 16 && alignof(GzVector2) == 8,
+static_assert(sizeof(GzVector2) == 8 && alignof(GzVector2) == 4,
               "Unexpected GzVector2 ABI layout");
 static_assert(sizeof(GzValueData) == 16 && alignof(GzValueData) == 8,
               "Unexpected GzValueData ABI layout");
@@ -70,6 +70,7 @@ static_assert(sizeof(GzValue) == 24 && alignof(GzValue) == 8 &&
                   offsetof(GzValue, data) == 8,
               "Unexpected GzValue ABI layout");
 #endif
+
 
 typedef enum {
   GZ_PROPERTY_HINT_NONE = 0,
@@ -115,13 +116,18 @@ typedef struct {
   GzStatus (*object_emit_signal)(uint64_t object_id, GzStringView signal,
                                  const GzValue *arguments,
                                  uint32_t argument_count);
+  void *(*get_method_bind)(GzStringView class_name, GzStringView method_name,
+                           int64_t hash);
+  GzStatus (*object_ptrcall)(void *method_bind, uint64_t object_id,
+                             const void *const *arguments, void *result);
 } GzEngineApi;
 
 #ifdef __cplusplus
-static_assert(sizeof(GzEngineApi) == 40 && alignof(GzEngineApi) == 8 &&
+static_assert(sizeof(GzEngineApi) == 56 && alignof(GzEngineApi) == 8 &&
                   offsetof(GzEngineApi, object_call) == 24,
               "Unexpected GzEngineApi ABI layout");
 #endif
+
 
 typedef GzStatus (*GzCreateInstance)(uint64_t owner_id, void **instance);
 typedef void (*GzDestroyInstance)(void *instance);

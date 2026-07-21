@@ -34,14 +34,16 @@ pub const ValueType = enum(u32) {
     object = 6,
 };
 
-pub const Vector2 = extern struct { x: f64, y: f64 };
+pub fn Vector2(comptime T: type) type {
+    return @Vector(2, T);
+}
 
 pub const ValueData = extern union {
     boolean: bool,
     integer: i64,
     floating: f64,
     string: StringView,
-    vector2: Vector2,
+    vector2: Vector2(f32),
     object_id: u64,
 };
 
@@ -81,6 +83,8 @@ pub const SignalDescriptor = extern struct {
     argument_count: u32,
 };
 
+pub const MethodBind = ?*anyopaque;
+
 pub const EngineApi = extern struct {
     abi_version: u32,
     struct_size: u32,
@@ -88,6 +92,8 @@ pub const EngineApi = extern struct {
     log_error: *const fn (StringView) callconv(.c) void,
     object_call: *const fn (u64, StringView, ?[*]const Value, u32, *Value) callconv(.c) Status,
     object_emit_signal: *const fn (u64, StringView, ?[*]const Value, u32) callconv(.c) Status,
+    get_method_bind: *const fn (StringView, StringView, i64) callconv(.c) MethodBind,
+    object_ptrcall: *const fn (MethodBind, u64, ?[*]const ?*const anyopaque, ?*anyopaque) callconv(.c) Status,
 };
 
 pub const ScriptDescriptor = extern struct {
