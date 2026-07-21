@@ -52,3 +52,14 @@ pub const log = struct {
         api.log_error(.from(message));
     }
 };
+
+pub fn getMethodBind(class_name: []const u8, method_name: []const u8, hash: i64) abi.MethodBind {
+    const api = engine_api orelse return null;
+    return api.get_method_bind(.from(class_name), .from(method_name), hash);
+}
+
+pub fn ptrcall(method_bind: abi.MethodBind, object_id: u64, args: ?[*]const ?*const anyopaque, result: ?*anyopaque) !void {
+    const api = engine_api orelse return error.EngineNotReady;
+    const status = api.object_ptrcall(method_bind, object_id, args, result);
+    if (status != .ok) return error.PtrCallFailed;
+}

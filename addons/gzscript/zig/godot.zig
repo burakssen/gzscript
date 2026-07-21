@@ -13,9 +13,11 @@ pub const signal = signals.signal;
 pub const InitContext = runtime.InitContext;
 pub const Object = runtime.Object;
 pub const log = runtime.log;
-pub const Vector2 = classes.Vector2;
+pub const Vector2 = abi.Vector2;
 pub const Side = classes.Side;
+
 pub const EulerOrder = classes.EulerOrder;
+
 pub const Node = classes.Node;
 pub const CanvasItem = classes.CanvasItem;
 pub const Node2D = classes.Node2D;
