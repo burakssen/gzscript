@@ -72,6 +72,16 @@ def camel_case(name: str) -> str:
     return head + "".join(part.capitalize().replace("2d", "2D").replace("3d", "3D") for part in tail)
 
 
+def camel_to_snake(name: str) -> str:
+    res = []
+    for i, c in enumerate(name):
+        if c.isupper() and i > 0 and (name[i-1].islower() or (i + 1 < len(name) and name[i+1].islower())):
+            res.append("_")
+        res.append(c.lower())
+    return "".join(res)
+
+
+
 def zig_type(
     type_name: str,
     *,
@@ -84,8 +94,9 @@ def zig_type(
         "bool": "bool",
         "int": "i64",
         "float": "f64",
-        "Vector2": "abi.Vector2",
+        "Vector2": "abi.Vector2(f64)",
     }
+
     if type_name in primitive:
         return primitive[type_name]
     if type_name == "String" and not returning:
@@ -140,37 +151,73 @@ def find_enum(entries: list[dict], name: str, context: str) -> dict:
     raise ValueError(f"{context} enum not found: {name}")
 
 
+def clean_enum_field_name(field_name: str, enum_name: str) -> str:
+    upper_field = field_name.upper()
+    prefixes = [camel_to_snake(enum_name).upper() + "_"]
+    for suffix in ["Mode", "Flags", "Direction", "Preset", "Order", "Filter", "Repeat"]:
+        if enum_name.endswith(suffix) and len(enum_name) > len(suffix):
+            base = enum_name[:-len(suffix)]
+            prefixes.append(camel_to_snake(base).upper() + "_")
+            if suffix == "Flags":
+                prefixes.append(camel_to_snake(enum_name[:-1]).upper() + "_")
+            elif suffix in ["Filter", "Repeat", "Preset"]:
+                prefixes.append(suffix.upper() + "_")
+    if "PRESET_MODE_" in upper_field:
+        prefixes.insert(0, "PRESET_MODE_")
+    elif "PRESET_" in upper_field:
+        prefixes.insert(0, "PRESET_")
+
+    for prefix in prefixes:
+        if upper_field.startswith(prefix):
+            trimmed = field_name[len(prefix):]
+            if trimmed:
+                return trimmed.lower()
+    return field_name.lower()
+
+
 def render_enum(entry: dict, indent: str = "") -> list[str]:
+    enum_name = entry["name"]
     values: dict[int, str] = {}
     aliases = []
     for value in entry.get("values", []):
         number = value["value"]
+        clean_name = clean_enum_field_name(value["name"], enum_name)
         if not isinstance(number, int) or not -(2**63) <= number < 2**63:
             raise ValueError(f"{entry['name']}.{value['name']} does not fit i64")
         if number in values:
-            aliases.append((value["name"], values[number]))
+            aliases.append((clean_name, values[number]))
         else:
-            values[number] = value["name"]
+            values[number] = clean_name
 
     lines = [f"{indent}pub const {identifier(entry['name'])} = enum(i64) {{"]
     for number, name in values.items():
-        lines.append(f"{indent}    {identifier(name.lower())} = {number},")
+        lines.append(f"{indent}    {identifier(name)} = {number},")
     if entry.get("is_bitfield"):
         lines.append(f"{indent}    _,")
     for alias, canonical in aliases:
         lines.append(
-            f"{indent}    pub const {identifier(alias.lower())}: @This() = .{identifier(canonical.lower())};"
+            f"{indent}    pub const {identifier(alias)}: @This() = .{identifier(canonical)};"
         )
     lines.append(f"{indent}}};")
     return lines
 
 
-def render_method(method: dict, generated_classes: set[str], enum_types: dict[str, str]) -> list[str]:
+
+def is_ptrcall_safe(type_name: str | None) -> bool:
+    if type_name is None:
+        return True
+    if "[]" in type_name or "?" in type_name:
+        return False
+    return True
+
+
+def render_method(method: dict, generated_classes: set[str], enum_types: dict[str, str], class_name: str = "") -> list[str]:
     if method.get("is_virtual") or method.get("is_static") or method.get("is_vararg"):
         raise ValueError(f"unsupported method kind: {method['name']}")
 
     parameters = ["self: @This()"]
     argument_names = []
+    argument_types = []
     for argument in method.get("arguments", []):
         argument_type = zig_type(
             argument["type"],
@@ -184,6 +231,7 @@ def render_method(method: dict, generated_classes: set[str], enum_types: dict[st
         argument_name = identifier(argument["name"])
         parameters.append(f"{argument_name}: {argument_type}")
         argument_names.append(argument_name)
+        argument_types.append(argument_type)
 
     return_value = method.get("return_value")
     return_type = None
@@ -198,16 +246,80 @@ def render_method(method: dict, generated_classes: set[str], enum_types: dict[st
         if return_type is None:
             raise ValueError(f"unsupported return type for {method['name']}: {return_value['type']}")
 
+    method_hash = method.get("hash", 0)
+    use_ptrcall = (
+        is_ptrcall_safe(return_type)
+        and all(is_ptrcall_safe(at) for at in argument_types)
+        and method_hash != 0
+        and class_name
+    )
+
     tuple_arguments = ".{" + ", ".join(argument_names) + "}"
     if len(argument_names) > 1:
         tuple_arguments = ".{ " + ", ".join(argument_names) + " }"
     lines = [f"    pub fn {identifier(camel_case(method['name']))}({', '.join(parameters)}) !{return_type or 'void'} {{"]
-    if return_type:
-        lines.append(
-            f'        return support.call(self, {return_type}, "{method["name"]}", {tuple_arguments});'
-        )
+    if use_ptrcall:
+        mb_var = f"_mb_{method['name']}"
+        lines.append(f'        if ({mb_var} == null) {mb_var} = runtime.getMethodBind("{class_name}", "{method["name"]}", {method_hash});')
+        if return_type:
+            lines.append(f'        return support.ptrcall(self, {return_type}, {mb_var}.?, {tuple_arguments});')
+        else:
+            lines.append(f'        try support.ptrcallVoid(self, {mb_var}.?, {tuple_arguments});')
     else:
-        lines.append(f'        try support.callVoid(self, "{method["name"]}", {tuple_arguments});')
+        if return_type:
+            lines.append(
+                f'        return support.call(self, {return_type}, "{method["name"]}", {tuple_arguments});'
+            )
+        else:
+            lines.append(f'        try support.callVoid(self, "{method["name"]}", {tuple_arguments});')
+    lines.append("    }")
+    return lines
+
+
+def find_declaring_class(method_name: str, class_name: str, classes: dict[str, dict]) -> str:
+    for cls in reversed(inheritance_chain(class_name, classes)):
+        declared = {m["name"] for m in classes[cls].get("methods", [])}
+        if method_name in declared:
+            return cls
+    return class_name
+
+
+def render_forwarded_method(method: dict, declaring_class: str, generated_classes: set[str], enum_types: dict[str, str]) -> list[str]:
+    parameters = ["self: @This()"]
+    argument_names = []
+    for argument in method.get("arguments", []):
+        argument_type = zig_type(
+            argument["type"],
+            returning=False,
+            generated_classes=generated_classes,
+            enum_types=enum_types,
+            required=argument.get("meta") == "required",
+        )
+        argument_name = identifier(argument["name"])
+        parameters.append(f"{argument_name}: {argument_type}")
+        argument_names.append(argument_name)
+
+    return_value = method.get("return_value")
+    return_type = None
+    if return_value:
+        return_type = zig_type(
+            return_value["type"],
+            returning=True,
+            generated_classes=generated_classes,
+            enum_types=enum_types,
+            required=return_value.get("meta") == "required",
+        )
+
+    method_name = identifier(camel_case(method["name"]))
+    call_args = ", ".join(argument_names)
+    lines = [
+        "    // ponytail: forward to ancestor class to avoid duplicating _mb_ handle",
+        f"    pub inline fn {method_name}({', '.join(parameters)}) !{return_type or 'void'} {{",
+    ]
+    if return_type:
+        lines.append(f"        return try self.as{declaring_class}().{method_name}({call_args});")
+    else:
+        lines.append(f"        try self.as{declaring_class}().{method_name}({call_args});")
     lines.append("    }")
     return lines
 
@@ -253,11 +365,13 @@ def generate(api: dict, profile: dict) -> str:
         "// Generated by tools/generate_bindings.py. Do not edit.",
         f"// Godot {version['version_major']}.{version['version_minor']}.{version['version_patch']} {version['version_status']}; precision: {version['precision']}.",
         'const abi = @import("abi.zig");',
+        'const runtime = @import("runtime.zig");',
         'const support = @import("class_support.zig");',
         "",
         "pub const Vector2 = abi.Vector2;",
         "",
     ]
+
     for enum_entry in selected_global_enums:
         lines.extend(render_enum(enum_entry))
         lines.append("")
@@ -288,11 +402,40 @@ def generate(api: dict, profile: dict) -> str:
                     ]
                 )
         methods = [] if class_name in shell_classes else selected_methods(class_name, classes, profile.get("methods", {}))
+        native_methods = []
+        forwarded_methods = []
         for method in methods:
+            declaring_class = find_declaring_class(method["name"], class_name, classes)
+            if declaring_class == class_name:
+                native_methods.append(method)
+            else:
+                forwarded_methods.append((method, declaring_class))
+
+        for method in native_methods:
+            arg_types = [
+                zig_type(a["type"], returning=False, generated_classes=generated_classes, enum_types=enum_types, required=a.get("meta") == "required")
+                for a in method.get("arguments", [])
+            ]
+            ret_type = (
+                zig_type(method["return_value"]["type"], returning=True, generated_classes=generated_classes, enum_types=enum_types, required=method["return_value"].get("meta") == "required")
+                if method.get("return_value")
+                else None
+            )
+            if is_ptrcall_safe(ret_type) and all(is_ptrcall_safe(at) for at in arg_types) and method.get("hash", 0) != 0:
+                lines.append(f'    var _mb_{method["name"]}: abi.MethodBind = null;')
+
+        for method in native_methods:
             lines.append("")
-            lines.extend(render_method(method, generated_classes, enum_types))
+            lines.extend(render_method(method, generated_classes, enum_types, class_name))
+
+        for method, declaring_class in forwarded_methods:
+            lines.append("")
+            lines.extend(render_forwarded_method(method, declaring_class, generated_classes, enum_types))
+
         lines.extend(["};", ""])
     return "\n".join(lines)
+
+
 
 
 def main() -> int:
