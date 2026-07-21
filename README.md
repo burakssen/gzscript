@@ -4,37 +4,31 @@ gzscript is a Godot 4.7 GDExtension that makes Zig 0.16 scripts attachable to Go
 
 The current MVP targets macOS, Linux, and Windows on x86_64 and ARM64.
 
-The `godot-cpp` submodule is pinned to commit `ba0edfed90512ec64aba51d4295a3e7e30112f86`, whose extension API reports Godot 4.7 stable.
+`build.zig.zon` pins godot-cpp commit `ba0edfed90512ec64aba51d4295a3e7e30112f86`, whose extension API reports Godot 4.7 stable. Zig fetches it automatically.
 
 ## Requirements
 
 - Godot 4.7 stable
 - Zig 0.16.0 installed locally
 - macOS, Linux, or Windows on x86_64 or ARM64
-- `uv` for the documented build command
 
 ## Build
 
-Initialize the dependency after cloning:
+Build the extension for the current desktop platform. Zig fetches godot-cpp,
+restores the pinned Godot 4.7 generated C++ bindings, and builds both godot-cpp
+and gzscript without Python, SCons, or CMake:
 
 ```sh
-git submodule update --init
+zig build --prefix . -Doptimize=Debug
+zig build --prefix . -Doptimize=ReleaseFast
 ```
 
-Build the extension for the current desktop platform. Supported SCons platform
-and architecture combinations are `macos`/`x86_64`, `macos`/`arm64`,
-`linux`/`x86_64`, `linux`/`arm64`, `windows`/`x86_64`, and
-`windows`/`arm64`:
-
-```sh
-uvx --from scons scons platform=macos target=template_debug arch=arm64 -j8
-uvx --from scons scons platform=macos target=template_release arch=arm64 -j8
-```
-
-Replace the platform and architecture values when building natively on Linux or
-Windows. The resulting extension is written to `addons/gzscript/bin`. The Zig
+Use Zig's standard `-Dtarget` option for another supported target, such as
+`-Dtarget=x86_64-linux-gnu`. `--prefix .` writes the resulting extension to
+`addons/gzscript/bin`; without it, Zig installs below `zig-out`. The Zig
 SDK in `addons/gzscript/zig` is the canonical source used by both development
-builds and release packages.
+builds and release packages. `Debug` produces Godot's debug library;
+`ReleaseSafe`, `ReleaseFast`, and `ReleaseSmall` produce its release library.
 
 The `gzscript-desktop` GitHub Actions artifact is an installable package with
 the complete `addons/gzscript` directory. It includes debug and release builds
@@ -111,11 +105,11 @@ try self.base.emitSignal("position_changed", .{position});
 The typed wrappers are generated from the pinned Godot API metadata and checked into the addon:
 
 ```sh
-python3 tools/generate_bindings.py
-python3 tools/generate_bindings.py --check
+zig build update-bindings
+zig build check-bindings
 ```
 
-`tools/bindings_profile.json` is the reviewed API allowlist. SCons regenerates the wrappers when the profile, generator, or Godot API metadata changes, and CI rejects stale generated output.
+`tools/bindings_profile.json` contains the reviewed root classes. The host Zig generator reads the pinned `extension_api.json`, emits every instance method supported by the current scalar, object, string-input, and `Vector2` type matrix, and derives required enums and dependency-only class wrappers from those signatures. Generated classes live in compact modules under `addons/gzscript/zig/generated_classes`; mutually dependent types are grouped into deterministic cycle modules. `class.zig` remains the stable compatibility facade, and CI validates the complete generated manifest and file contents.
 
 ## Tests
 
@@ -130,5 +124,5 @@ This runs Zig reflection tests, headless lifecycle/property and save integration
 - Mobile and Web exports are not implemented.
 - Active instances are not migrated after recompilation.
 - Script callbacks currently cover `_ready`, `_process`, and `_physics_process`.
-- Generated typed methods are currently limited to the ABI v2 scalar, object ID, string-input, and `Vector2` codecs selected in `tools/bindings_profile.json`.
+- Generated typed methods are currently limited to the ABI v2 scalar, object ID, string-input, and `Vector2` type matrix.
 - `Vector3`, transforms, colors, rectangles, arrays, dictionaries, packed arrays, `Callable`, and general `Variant` values are not yet supported by the typed ABI.
