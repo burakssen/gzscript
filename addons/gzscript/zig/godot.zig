@@ -24,9 +24,23 @@ pub const Node2D = classes.Node2D;
 pub const Sprite2D = classes.Sprite2D;
 pub const Control = classes.Control;
 pub const Node3D = classes.Node3D;
-pub const Texture2D = classes.Texture2D;
-pub const Viewport = classes.Viewport;
+pub const Window = classes.Window;
+pub const SceneTree = classes.SceneTree;
 pub const Tween = classes.Tween;
+pub const Viewport = classes.Viewport;
+pub const MultiplayerAPI = classes.MultiplayerAPI;
+pub const MultiMesh = classes.MultiMesh;
+pub const Texture2D = classes.Texture2D;
+pub const CanvasLayer = classes.CanvasLayer;
+pub const World2D = classes.World2D;
+pub const Material = classes.Material;
+pub const InputEvent = classes.InputEvent;
+pub const Theme = classes.Theme;
+pub const StyleBox = classes.StyleBox;
+pub const Font = classes.Font;
+pub const AccessibilityServer = classes.AccessibilityServer;
+pub const World3D = classes.World3D;
+pub const Node3DGizmo = classes.Node3DGizmo;
 
 pub fn initialize(api: *const abi.EngineApi, output: **const abi.ScriptDescriptor, descriptor: *const abi.ScriptDescriptor) abi.Status {
     if (api.abi_version != abi.abi_version or api.struct_size != @sizeOf(abi.EngineApi)) return .abi_mismatch;

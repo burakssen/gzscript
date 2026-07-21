@@ -1,0 +1,2 @@
+*.zig text eol=lf
+addons/gzscript/zig/generated_classes/manifest.txt text eol=lf

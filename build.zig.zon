@@ -1,0 +1,13 @@
+.{
+    .name = .gzscript,
+    .version = "0.0.1",
+    .dependencies = .{
+        .godot_cpp = .{
+            .url = "git+https://github.com/godotengine/godot-cpp.git#ba0edfed90512ec64aba51d4295a3e7e30112f86",
+            .hash = "N-V-__8AAJC5DQJflolgicIbp13f0ElAhnX8MFAwziX9FUlR",
+        },
+    },
+    .minimum_zig_version = "0.16.0",
+    .paths = .{""},
+    .fingerprint = 0x5a57df37daceabdf,
+}

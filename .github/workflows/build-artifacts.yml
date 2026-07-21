@@ -21,27 +21,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: recursive
-
-      - name: Verify generated bindings
-        run: python3 tools/generate_bindings.py --check
-
-      - name: Test binding generator
-        run: python3 -m unittest tests/test_generate_bindings.py
 
       - name: Install Zig 0.16.0
-        run: |
-          curl -fsSLo "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz
-          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
-          mkdir "$RUNNER_TEMP/zig"
-          tar -xJf "$RUNNER_TEMP/zig.tar.xz" --strip-components=1 -C "$RUNNER_TEMP/zig"
-          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+        run: sh .github/scripts/install-zig.sh
 
-      - name: Test Zig SDK
+      - name: Test generators and Zig SDK
         run: |
-          zig fmt --check addons/gzscript/zig examples/basic/scripts addons/gzscript/templates tests
-          zig test --dep godot -Mroot=tests/zig_adapter_test.zig -Mgodot=addons/gzscript/zig/godot.zig
+          zig build check-bindings
+          zig build test
+          zig fmt --check build.zig tools addons/gzscript/zig/*.zig examples/basic/scripts tests
 
   build:
     name: ${{ matrix.name }}
@@ -56,49 +44,52 @@ jobs:
             runner: macos-15
             platform: macos
             arch: x86_64
+            target: x86_64-macos
           - name: macOS ARM64
             runner: macos-15
             platform: macos
             arch: arm64
+            target: aarch64-macos
           - name: Linux x86_64
             runner: ubuntu-24.04
             platform: linux
             arch: x86_64
+            target: x86_64-linux-gnu
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
             platform: linux
             arch: arm64
+            target: aarch64-linux-gnu
           - name: Windows x86_64
             runner: windows-2022
             platform: windows
             arch: x86_64
+            target: x86_64-windows-gnu
           - name: Windows ARM64
             runner: windows-11-arm
             platform: windows
             arch: arm64
+            target: aarch64-windows-gnu
 
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          submodules: recursive
 
-      - name: Install SCons
-        run: python -m pip install --disable-pip-version-check scons==4.9.1
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: sh .github/scripts/install-zig.sh
 
       - name: Build debug library
         shell: bash
         env:
-          PLATFORM: ${{ matrix.platform }}
-          ARCH: ${{ matrix.arch }}
-        run: scons platform="$PLATFORM" target=template_debug arch="$ARCH" -j2
+          TARGET: ${{ matrix.target }}
+        run: zig build --prefix . -Dtarget="$TARGET" -Doptimize=Debug -j2
 
       - name: Build release library
         shell: bash
         env:
-          PLATFORM: ${{ matrix.platform }}
-          ARCH: ${{ matrix.arch }}
-        run: scons platform="$PLATFORM" target=template_release arch="$ARCH" -j2
+          TARGET: ${{ matrix.target }}
+        run: zig build --prefix . -Dtarget="$TARGET" -Doptimize=ReleaseFast -j2
 
       - name: Upload platform binaries
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3

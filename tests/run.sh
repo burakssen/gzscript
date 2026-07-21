@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-scons platform=macos target=template_release arch=arm64 -j8
-python3 -m unittest tests/test_generate_bindings.py
-zig fmt --check addons/gzscript/zig examples/basic/scripts addons/gzscript/templates tests
-zig test --dep godot -Mroot=tests/zig_adapter_test.zig -Mgodot=addons/gzscript/zig/godot.zig
+zig build --prefix . -Doptimize=ReleaseFast
+zig build check-bindings
+zig build test
+zig fmt --check addons/gzscript/zig/*.zig examples/basic/scripts tests
 
 zig_executable=$(command -v zig)
 godot_executable=$(command -v godot)
@@ -15,6 +15,7 @@ run_godot() {
     "$godot_executable" --headless --path . "$@"
 }
 
+run_godot --editor --quit
 run_godot
 run_godot --script tests/live_bindings_runner.gd
 run_godot --script tests/save_runner.gd
