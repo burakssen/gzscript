@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-scons platform=macos target=template_debug arch=arm64 -j8
+scons platform=macos target=template_release arch=arm64 -j8
 python3 -m unittest tests/test_generate_bindings.py
 zig fmt --check addons/gzscript/zig examples/basic/scripts addons/gzscript/templates tests
 zig test --dep godot -Mroot=tests/zig_adapter_test.zig -Mgodot=addons/gzscript/zig/godot.zig

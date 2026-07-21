@@ -57,7 +57,9 @@ class GenerateBindingsTest(unittest.TestCase):
         self.assertEqual(first_text, second_text)
         self.assertIn("pub const Node2D = extern struct", first_text)
         self.assertIn("pub const Sprite2D = extern struct", first_text)
-        self.assertEqual(3, first_text.count("pub fn setRotation("))
+        self.assertEqual(2, first_text.count("pub fn setRotation("))
+        self.assertIn("pub inline fn setRotation(", first_text)
+
         self.assertNotIn("pub fn setTransform(", first_text)
         self.assertIn("pub fn asNode(self: @This()) Node", first_text)
         self.assertIn("pub fn asCanvasItem(self: @This()) CanvasItem", first_text)
@@ -74,8 +76,9 @@ class GenerateBindingsTest(unittest.TestCase):
         self.assertIn("pub fn setTexture(self: @This(), texture: ?Texture2D) !void", first_text)
         self.assertIn("pub fn getTexture(self: @This()) !?Texture2D", first_text)
         self.assertIn("pub fn createTween(self: @This()) !Tween", first_text)
-        self.assertIn('try support.callVoid(self, "set_process_mode", .{mode});', first_text)
-        self.assertIn("pub const layout_direction_locale: @This() = .layout_direction_application_locale;", first_text)
+        self.assertIn("try support.ptrcallVoid(self, _mb_set_process_mode.?, .{mode});", first_text)
+        self.assertIn("pub const locale: @This() = .application_locale;", first_text)
+
         size_flags = first_text.split("pub const SizeFlags = enum(i64)", 1)[1].split("};", 1)[0]
         self.assertIn("    _,", size_flags)
         self.assertIn("pub const Texture2D = extern struct", first_text)

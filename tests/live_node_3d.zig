@@ -17,10 +17,10 @@ pub fn _ready(self: *Self) !void {
     const node = self.base.asNode();
     if (node.owner != self.base.owner) return error.UpcastIdentityMismatch;
 
-    try self.base.setRotationOrder(.euler_order_zyx);
-    if (try self.base.getRotationOrder() != .euler_order_zyx) return error.RotationOrderMismatch;
-    try self.base.setRotationEditMode(.rotation_edit_mode_quaternion);
-    if (try self.base.getRotationEditMode() != .rotation_edit_mode_quaternion) return error.RotationEditModeMismatch;
+    try self.base.setRotationOrder(.zyx);
+    if (try self.base.getRotationOrder() != .zyx) return error.RotationOrderMismatch;
+    try self.base.setRotationEditMode(.quaternion);
+    if (try self.base.getRotationEditMode() != .quaternion) return error.RotationEditModeMismatch;
 
     try self.base.setVisible(false);
     if (try self.base.isVisible()) return error.Node3DDidNotHide;

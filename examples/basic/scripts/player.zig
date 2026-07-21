@@ -20,7 +20,7 @@ pub const exports = .{
 
 pub const signals = .{
     .zig_ready = gd.signal(.{}),
-    .position_changed = gd.signal(.{ .position = gd.Vector2 }),
+    .position_changed = gd.signal(.{ .position = gd.Vector2(f64) }),
 };
 
 pub fn init(ctx: gd.InitContext) !Self {
@@ -30,14 +30,14 @@ pub fn init(ctx: gd.InitContext) !Self {
 pub fn _ready(self: *Self) !void {
     const object = gd.Object{ .owner = self.base.owner };
     if (object.call("__gzscript_missing_method__", &.{})) |_| return error.ExpectedCallFailure else |_| {}
-    try self.base.setPosition(.{ .x = 12.0, .y = 34.0 });
+    try self.base.setPosition(.{ 12.0, 34.0 });
     try self.base.setRotation(0.5);
-    try self.base.setScale(.{ .x = 2.0, .y = 3.0 });
+    try self.base.setScale(.{ 2.0, 3.0 });
     try self.base.moveLocalX(0.0, false);
     const position = try self.base.getPosition();
-    if (position.x != 12.0 or position.y != 34.0) return error.PositionMismatch;
-    const global_origin = try self.base.toGlobal(.{ .x = 0.0, .y = 0.0 });
-    if (global_origin.x != position.x or global_origin.y != position.y) return error.TransformMismatch;
+    if (position[0] != 12.0 or position[1] != 34.0) return error.PositionMismatch;
+    const global_origin = try self.base.toGlobal(.{ 0.0, 0.0 });
+    if (global_origin[0] != position[0] or global_origin[1] != position[1]) return error.TransformMismatch;
     try self.base.emitSignal("zig_ready", .{});
     try self.base.emitSignal("position_changed", .{position});
     gd.log.info("Zig player ready", .{});

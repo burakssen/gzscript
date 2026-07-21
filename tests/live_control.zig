@@ -18,12 +18,12 @@ pub fn _ready(self: *Self) !void {
     const node = self.base.asNode();
     if (canvas.owner != self.base.owner or node.owner != self.base.owner) return error.UpcastIdentityMismatch;
 
-    try self.base.setPosition(.{ .x = 11.0, .y = 13.0 }, false);
+    try self.base.setPosition(.{ 11.0, 13.0 }, false);
     const position = try self.base.getPosition();
-    if (position.x != 11.0 or position.y != 13.0) return error.ControlPositionMismatch;
+    if (position[0] != 11.0 or position[1] != 13.0) return error.ControlPositionMismatch;
 
-    try self.base.setLayoutDirection(.layout_direction_ltr);
-    if (try self.base.getLayoutDirection() != .layout_direction_ltr) return error.LayoutDirectionMismatch;
+    try self.base.setLayoutDirection(.ltr);
+    if (try self.base.getLayoutDirection() != .ltr) return error.LayoutDirectionMismatch;
 
     try canvas.setVisible(false);
     if (try canvas.isVisible()) return error.ControlDidNotHide;

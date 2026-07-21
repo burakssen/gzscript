@@ -35,7 +35,7 @@ const TestScript = struct {
 
     pub const signals = .{
         .started = gd.signal(.{}),
-        .position_changed = gd.signal(.{ .position = gd.Vector2 }),
+        .position_changed = gd.signal(.{ .position = gd.Vector2(f64) }),
     };
 
     pub fn init(ctx: gd.InitContext) !Self {
@@ -74,10 +74,13 @@ test "2D wrappers expose typed position methods" {
 
 test "ABI v2 layouts remain stable" {
     try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.StringView));
-    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.Vector2));
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.Vector2(f64)));
+    try std.testing.expectEqual(@as(usize, 8), @sizeOf(gd.abi.Vector2(f32)));
+
     try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.ValueData));
     try std.testing.expectEqual(@as(usize, 24), @sizeOf(gd.abi.Value));
-    try std.testing.expectEqual(@as(usize, 40), @sizeOf(gd.abi.EngineApi));
+    try std.testing.expectEqual(@as(usize, 56), @sizeOf(gd.abi.EngineApi));
+
     try std.testing.expectEqual(@as(usize, 8), @alignOf(gd.abi.Value));
     try std.testing.expectEqual(@as(usize, 8), @offsetOf(gd.abi.Value, "data"));
 }
@@ -93,28 +96,35 @@ test "shared codec supports objects and nullable objects" {
     const decoded = try gd.codec.fromValue(TestObject, &encoded);
     try std.testing.expectEqual(@as(u64, 42), decoded.owner);
 
-    const nil_object = gd.abi.Value{ .type = .object, .data = .{ .object_id = 0 } };
-    try std.testing.expectEqual(@as(?TestObject, null), try gd.codec.fromValue(?TestObject, &nil_object));
+    const nullable_object: ?TestObject = object;
+    const encoded_nullable = gd.codec.toValue(nullable_object);
+    const decoded_nullable = try gd.codec.fromValue(?TestObject, &encoded_nullable);
+    try std.testing.expectEqual(@as(u64, 42), decoded_nullable.?.owner);
+
+    const nil_object: ?TestObject = null;
+    const encoded_nil = gd.codec.toValue(nil_object);
+    const decoded_nil = try gd.codec.fromValue(?TestObject, &encoded_nil);
+    try std.testing.expectEqual(@as(?TestObject, null), decoded_nil);
 }
 
 test "shared codec round-trips ABI v2 value types" {
-    const boolean = gd.codec.toValue(true);
-    try std.testing.expect(try gd.codec.fromValue(bool, &boolean));
+    const vector = gd.codec.toValue(gd.Vector2(f64){ 3.0, 4.0 });
+    try std.testing.expectEqual(gd.abi.ValueType.vector2, vector.type);
+    const decoded_vector = try gd.codec.fromValue(gd.Vector2(f64), &vector);
+    try std.testing.expectEqual(@as(f64, 3.0), decoded_vector[0]);
+    try std.testing.expectEqual(@as(f64, 4.0), decoded_vector[1]);
 
-    const integer = gd.codec.toValue(@as(i32, -42));
-    try std.testing.expectEqual(@as(i32, -42), try gd.codec.fromValue(i32, &integer));
+    const vector_f32 = gd.codec.toValue(gd.Vector2(f32){ 3.0, 4.0 });
+    try std.testing.expectEqual(gd.abi.ValueType.vector2, vector_f32.type);
+    const decoded_f32 = try gd.codec.fromValue(gd.Vector2(f32), &vector_f32);
+    try std.testing.expectEqual(@as(f32, 3.0), decoded_f32[0]);
+    try std.testing.expectEqual(@as(f32, 4.0), decoded_f32[1]);
 
     const floating = gd.codec.toValue(@as(f32, 1.5));
     try std.testing.expectEqual(@as(f32, 1.5), try gd.codec.fromValue(f32, &floating));
 
     const string = gd.codec.toValue(@as([]const u8, "zig"));
     try std.testing.expectEqualStrings("zig", try gd.codec.fromValue([]const u8, &string));
-
-    const vector = gd.codec.toValue(gd.Vector2{ .x = 3.0, .y = 4.0 });
-    try std.testing.expectEqual(
-        gd.Vector2{ .x = 3.0, .y = 4.0 },
-        try gd.codec.fromValue(gd.Vector2, &vector),
-    );
 
     const absent = gd.codec.toValue(@as(?TestObject, null));
     try std.testing.expectEqual(gd.abi.ValueType.nil, absent.type);
@@ -125,6 +135,14 @@ test "shared codec rejects integer overflow" {
     try std.testing.expectError(error.IntegerOverflow, gd.codec.fromValue(u8, &encoded));
 }
 
+fn discardGetMethodBind(_: gd.abi.StringView, _: gd.abi.StringView, _: i64) callconv(.c) gd.abi.MethodBind {
+    return null;
+}
+
+fn discardPtrcall(_: gd.abi.MethodBind, _: u64, _: ?[*]const ?*const anyopaque, _: ?*anyopaque) callconv(.c) gd.abi.Status {
+    return .ok;
+}
+
 test "runtime preserves engine call errors" {
     const api = gd.abi.EngineApi{
         .abi_version = gd.abi.abi_version,
@@ -133,7 +151,10 @@ test "runtime preserves engine call errors" {
         .log_error = discardLog,
         .object_call = missingMethodCall,
         .object_emit_signal = discardSignal,
+        .get_method_bind = discardGetMethodBind,
+        .object_ptrcall = discardPtrcall,
     };
+
     var descriptor: *const gd.abi.ScriptDescriptor = undefined;
     try std.testing.expectEqual(
         gd.abi.Status.ok,
@@ -218,20 +239,21 @@ test "generated upcasts preserve object identity" {
 }
 
 test "generated tagged enums preserve Godot values" {
-    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Side.side_left));
-    try std.testing.expectEqual(@as(i64, 3), @intFromEnum(gd.Side.side_bottom));
-    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.EulerOrder.euler_order_xyz));
-    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Node.ProcessMode.process_mode_inherit));
-    try std.testing.expectEqual(@as(i64, 8), @intFromEnum(gd.Control.LayoutPreset.preset_center));
-    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Node3D.RotationEditMode.rotation_edit_mode_euler));
+    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Side.left));
+    try std.testing.expectEqual(@as(i64, 3), @intFromEnum(gd.Side.bottom));
+    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.EulerOrder.xyz));
+    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Node.ProcessMode.inherit));
+    try std.testing.expectEqual(@as(i64, 8), @intFromEnum(gd.Control.LayoutPreset.center));
+    try std.testing.expectEqual(@as(i64, 0), @intFromEnum(gd.Node3D.RotationEditMode.euler));
     try std.testing.expectEqual(
-        gd.Control.LayoutDirection.layout_direction_application_locale,
-        gd.Control.LayoutDirection.layout_direction_locale,
+        gd.Control.LayoutDirection.application_locale,
+        gd.Control.LayoutDirection.locale,
     );
 }
 
 test "shared codec safely round-trips generated enums" {
-    const order = gd.EulerOrder.euler_order_zyx;
+    const order = gd.EulerOrder.zyx;
+
     const encoded_order = gd.codec.toValue(order);
     try std.testing.expectEqual(gd.abi.ValueType.integer, encoded_order.type);
     try std.testing.expectEqual(order, try gd.codec.fromValue(gd.EulerOrder, &encoded_order));

@@ -91,10 +91,10 @@ pub fn _process(self: *Self, delta: f64) !void {
 
         var j: u32 = 0;
         while (j < 100000) : (j += 1) {
-            try self.base.setPosition(.{ .x = target_x, .y = target_y });
+            try self.base.setPosition(.{ target_x, target_y });
             const p = try self.base.getPosition();
-            target_x = @as(f32, @floatCast(p.x + 0.001));
-            target_y = @as(f32, @floatCast(p.y + 0.001));
+            target_x = @as(f32, @floatCast(p[0] + 0.001));
+            target_y = @as(f32, @floatCast(p[1] + 0.001));
         }
         self.mode = 0;
     } else if (self.mode == 4) {
@@ -108,10 +108,11 @@ pub fn _process(self: *Self, delta: f64) !void {
             const child_node = (try parent.getChild(c, false)) orelse continue;
             const node2d = gd.Node2D{ .owner = child_node.owner };
             const fc = @as(f32, @floatFromInt(c));
-            try node2d.setPosition(.{ .x = fc * 1.5, .y = fc * 2.5 });
+            try node2d.setPosition(.{ fc * 1.5, fc * 2.5 });
             try node2d.setRotation(fc * 0.01);
             try node2d.asCanvasItem().setVisible(@rem(c, 2) == 0);
         }
+
         self.mode = 0;
     }
 }
