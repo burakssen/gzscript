@@ -42,6 +42,41 @@ pub fn ptrcallVoid(self: anytype, mb: abi.MethodBind, arguments: anytype) !void 
     try runtime.ptrcall(mb, self.owner, if (fields.len == 0) null else &arg_ptrs, null);
 }
 
+fn MethodCache(comptime class_name: []const u8, comptime method_name: []const u8, comptime hash: i64) type {
+    return struct {
+        var value: abi.MethodBind = null;
+        const class = class_name;
+        const method = method_name;
+        const method_hash = hash;
+
+        fn get() abi.MethodBind {
+            if (value == null) value = runtime.getMethodBind(class, method, method_hash);
+            return value.?;
+        }
+    };
+}
+
+pub fn ptrcallMethodVoid(
+    self: anytype,
+    comptime class_name: []const u8,
+    comptime method_name: []const u8,
+    comptime hash: i64,
+    arguments: anytype,
+) !void {
+    return ptrcallVoid(self, MethodCache(class_name, method_name, hash).get(), arguments);
+}
+
+pub fn ptrcallMethod(
+    self: anytype,
+    comptime T: type,
+    comptime class_name: []const u8,
+    comptime method_name: []const u8,
+    comptime hash: i64,
+    arguments: anytype,
+) !T {
+    return ptrcall(self, T, MethodCache(class_name, method_name, hash).get(), arguments);
+}
+
 pub fn ptrcall(self: anytype, comptime T: type, mb: abi.MethodBind, arguments: anytype) !T {
     const fields = @typeInfo(@TypeOf(arguments)).@"struct".fields;
     var arg_ptrs: [fields.len]?*const anyopaque = undefined;
