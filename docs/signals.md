@@ -25,7 +25,7 @@ Scripts declare signals with named compile-time arguments:
 ```zig
 pub const signals = .{
     .movement_started = gd.signal(.{}),
-    .position_changed = gd.signal(.{ .position = gd.Vector2 }),
+    .position_changed = gd.signal(.{ .position = gd.Vector2(f64) }),
 };
 ```
 
@@ -49,8 +49,8 @@ and emits the signal on the script owner.
 - The example player declares a parameterless signal and a `Vector2` signal.
 - The GDScript integration test verifies metadata, connections, emission count,
   and payload values.
-- Formatting, native builds, Zig tests, Godot integration tests, shell linting,
-  and diff checks must pass.
+- Formatting, native builds, Zig tests, Godot integration tests, and diff checks
+  must pass.
 
 ## Decision Log
 

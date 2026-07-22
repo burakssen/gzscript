@@ -49,6 +49,20 @@ The addon compiles scripts on resource load and save. Its editor plugin also rec
 
 Generated adapters and libraries are stored below `.godot/gzscript` and can be deleted safely.
 
+Runtime modules default to Zig's `Debug` optimization mode. Change **Project
+Settings > Gzscript > Compiler > Optimization** to `ReleaseSafe`,
+`ReleaseFast`, or `ReleaseSmall` when testing exported-project performance. The
+optimization mode is part of the module cache identity.
+
+The cache identity includes the script path and source, every `.zig` file below
+the script's directory, the complete bundled Zig SDK and generated bindings,
+the ABI and adapter versions, the selected Zig executable and reported version,
+the platform, architecture, and optimization mode. This conservative policy may
+recompile when an unrelated Zig file in the same directory changes, but it does
+not reuse a module after a relative import changes. In-memory source must be
+saved before compilation so the cache identity cannot differ from the file Zig
+actually compiles.
+
 ## Script API
 
 ```zig
@@ -86,14 +100,14 @@ pub fn _process(self: *Self, delta: f64) !void {
 }
 ```
 
-Only fields listed in `exports` are visible to Godot. Exported fields must have defaults. The MVP supports `bool`, integer types, `f32`, `f64`, `[]const u8`, and `gd.Vector2` descriptor types. The bundled templates currently cover `Node`, `Node2D`, `Sprite2D`, and `Control`.
+Only fields listed in `exports` are visible to Godot. Exported fields must have defaults. The MVP supports `bool`, integer types, `f32`, `f64`, `[]const u8`, and `gd.Vector2(T)` descriptor types. Script templates are generated for the selected Godot base class.
 
 Signals use named, typed arguments and are emitted through the base object:
 
 ```zig
 pub const signals = .{
     .started = gd.signal(.{}),
-    .position_changed = gd.signal(.{ .position = gd.Vector2 }),
+    .position_changed = gd.signal(.{ .position = gd.Vector2(f64) }),
 };
 
 try self.base.emitSignal("started", .{});
@@ -119,10 +133,28 @@ sh tests/run.sh
 
 This runs Zig reflection tests, headless lifecycle/property and save integration tests, invalid-source handling, and editor language/export refresh checks.
 
+Benchmarks are intentionally separate from the correctness gate because shared
+CI runners do not provide stable timing. After building and importing the
+project, run them manually with:
+
+```sh
+GZSCRIPT_ZIG_PATH="$(command -v zig)" \
+  godot --headless --path . --script tests/benchmark_runner.gd
+```
+
+## Reload contract
+
+A successful reload publishes the new module for future instances and refreshes
+editor metadata. Existing instances keep the exact module and Zig-owned state
+with which they were created. A failed reload does not replace that module, so
+existing instances remain safe, but the script is marked invalid and cannot
+create new instances until a later successful reload. `keep_state` does not
+currently migrate private or exported state between module versions.
+
 ## MVP limitations
 
 - Mobile and Web exports are not implemented.
-- Active instances are not migrated after recompilation.
+- Active instances are not migrated after recompilation; see the reload contract above.
 - Script callbacks currently cover `_ready`, `_process`, and `_physics_process`.
 - Generated typed methods are currently limited to the ABI v2 scalar, object ID, string-input, and `Vector2` type matrix.
 - `Vector3`, transforms, colors, rectangles, arrays, dictionaries, packed arrays, `Callable`, and general `Variant` values are not yet supported by the typed ABI.
