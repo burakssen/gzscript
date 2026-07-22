@@ -42,8 +42,75 @@ const TestScript = struct {
         return .{ .base = .{ .owner = ctx.owner } };
     }
 
-    pub fn _ready(_: *Self) !void {}
+    pub fn ready(self: *Self) !void {
+        self.internal = 1.0;
+    }
+
+    pub fn process(self: *Self, delta: f64) !void {
+        self.internal = delta;
+    }
+
+    pub fn input(self: *Self, event: gd.InputEvent) !void {
+        self.internal = @floatFromInt(event.owner);
+    }
 };
+
+test "adapter dispatches callbacks: ready, process, input" {
+    var api = gd.abi.EngineApi{
+        .abi_version = gd.abi.abi_version,
+        .struct_size = @sizeOf(gd.abi.EngineApi),
+        .log_info = discardLog,
+        .log_error = discardLog,
+        .object_call = missingMethodCall,
+        .object_emit_signal = discardSignal,
+        .get_method_bind = undefined,
+        .object_ptrcall = undefined,
+    };
+
+    var descriptor: *const gd.abi.ScriptDescriptor = undefined;
+    try std.testing.expectEqual(
+        gd.abi.Status.ok,
+        gd.initialize(&api, &descriptor, &gd.ScriptAdapter(TestScript).descriptor),
+    );
+
+    var instance_ptr: ?*anyopaque = null;
+    try std.testing.expectEqual(gd.abi.Status.ok, descriptor.create_instance(42, &instance_ptr));
+    defer descriptor.destroy_instance(instance_ptr);
+
+    // Call ready
+    var result_val = gd.abi.Value{};
+    try std.testing.expectEqual(
+        gd.abi.Status.ok,
+        descriptor.call_method(instance_ptr, gd.abi.StringView.from("_ready"), null, 0, &result_val),
+    );
+
+    // Call process
+    var process_args = [_]gd.abi.Value{
+        .{ .type = .floating, .data = .{ .floating = 3.14 } },
+    };
+    try std.testing.expectEqual(
+        gd.abi.Status.ok,
+        descriptor.call_method(instance_ptr, gd.abi.StringView.from("_process"), &process_args, 1, &result_val),
+    );
+
+    // Call input with an object (e.g. InputEvent)
+    var input_args = [_]gd.abi.Value{
+        .{ .type = .object, .data = .{ .object_id = 999 } },
+    };
+    try std.testing.expectEqual(
+        gd.abi.Status.ok,
+        descriptor.call_method(instance_ptr, gd.abi.StringView.from("_input"), &input_args, 1, &result_val),
+    );
+
+    // Call with invalid arg type
+    var bad_args = [_]gd.abi.Value{
+        .{ .type = .integer, .data = .{ .integer = 42 } },
+    };
+    try std.testing.expectEqual(
+        gd.abi.Status.type_mismatch,
+        descriptor.call_method(instance_ptr, gd.abi.StringView.from("_input"), &bad_args, 1, &result_val),
+    );
+}
 
 test "adapter reflects explicit exports only" {
     const descriptor = gd.ScriptAdapter(TestScript).descriptor;

@@ -78,7 +78,7 @@ Ref<Script> GzLanguage::_make_template(const String &, const String &,
                      "pub fn init(ctx: gd.InitContext) !Self {\n"
                      "    return .{ .base = .{ .owner = ctx.owner } };\n"
                      "}\n\n"
-                     "pub fn _ready(self: *Self) !void {\n"
+                     "pub fn ready(self: *Self) !void {\n"
                      "    _ = self;\n"
                      "}\n");
   return script;

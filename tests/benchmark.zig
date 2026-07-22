@@ -15,11 +15,11 @@ pub fn init(ctx: gd.InitContext) !Self {
     return .{ .base = .{ .owner = ctx.owner } };
 }
 
-pub fn _ready(self: *Self) !void {
+pub fn ready(self: *Self) !void {
     _ = self;
 }
 
-pub fn _process(self: *Self, delta: f64) !void {
+pub fn process(self: *Self, delta: f64) !void {
     _ = delta;
     if (self.mode == 1) {
         // 1. Particle Physics Benchmark (500 boids x 20 steps = 5,000,000 interactions)

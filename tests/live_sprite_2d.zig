@@ -13,7 +13,7 @@ pub fn init(ctx: gd.InitContext) !Self {
     return .{ .base = .{ .owner = ctx.owner } };
 }
 
-pub fn _ready(self: *Self) !void {
+pub fn ready(self: *Self) !void {
     const node2d = self.base.asNode2D();
     const canvas = self.base.asCanvasItem();
     const node = self.base.asNode();
@@ -37,4 +37,14 @@ pub fn _ready(self: *Self) !void {
     const parent = (try node.getParent()) orelse return error.MissingParent;
     if ((try node.getOwner()) != null) return error.UnexpectedSceneOwner;
     try self.base.emitSignal("verified", .{ parent, node });
+}
+
+pub fn enterTree(self: *Self) !void {
+    gd.log.info("Sprite2D enter tree", .{});
+    _ = self;
+}
+
+pub fn draw(self: *Self) !void {
+    gd.log.info("Sprite2D draw", .{});
+    _ = self;
 }

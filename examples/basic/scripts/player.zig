@@ -27,7 +27,7 @@ pub fn init(ctx: gd.InitContext) !Self {
     return .{ .base = .{ .owner = ctx.owner } };
 }
 
-pub fn _ready(self: *Self) !void {
+pub fn ready(self: *Self) !void {
     const object = gd.Object{ .owner = self.base.owner };
     if (object.call("__gzscript_missing_method__", &.{})) |_| return error.ExpectedCallFailure else |_| {}
     try self.base.setPosition(.{ 12.0, 34.0 });
@@ -43,6 +43,6 @@ pub fn _ready(self: *Self) !void {
     gd.log.info("Zig player ready", .{});
 }
 
-pub fn _process(self: *Self, delta: f64) !void {
+pub fn process(self: *Self, delta: f64) !void {
     self.time_passed += delta;
 }

@@ -13,7 +13,7 @@ pub fn init(ctx: gd.InitContext) !Self {
     return .{ .base = .{ .owner = ctx.owner } };
 }
 
-pub fn _ready(self: *Self) !void {
+pub fn ready(self: *Self) !void {
     const node = self.base.asNode();
     if (node.owner != self.base.owner) return error.UpcastIdentityMismatch;
 

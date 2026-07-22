@@ -10,10 +10,32 @@ fn baseName(comptime T: type) []const u8 {
     return T.godot_class;
 }
 
+const CallbackMapping = struct {
+    godot_name: []const u8,
+    zig_name: []const u8,
+    argument_count: u32,
+};
+
+const callbacks = [_]CallbackMapping{
+    .{ .godot_name = "_ready", .zig_name = "ready", .argument_count = 0 },
+    .{ .godot_name = "_enter_tree", .zig_name = "enterTree", .argument_count = 0 },
+    .{ .godot_name = "_exit_tree", .zig_name = "exitTree", .argument_count = 0 },
+    .{ .godot_name = "_process", .zig_name = "process", .argument_count = 1 },
+    .{ .godot_name = "_physics_process", .zig_name = "physicsProcess", .argument_count = 1 },
+    .{ .godot_name = "_input", .zig_name = "input", .argument_count = 1 },
+    .{ .godot_name = "_unhandled_input", .zig_name = "unhandledInput", .argument_count = 1 },
+    .{ .godot_name = "_shortcut_input", .zig_name = "shortcutInput", .argument_count = 1 },
+    .{ .godot_name = "_unhandled_key_input", .zig_name = "unhandledKeyInput", .argument_count = 1 },
+    .{ .godot_name = "_gui_input", .zig_name = "guiInput", .argument_count = 1 },
+    .{ .godot_name = "_draw", .zig_name = "draw", .argument_count = 0 },
+};
+
 fn methodCount(comptime T: type) usize {
-    return @as(usize, @intFromBool(@hasDecl(T, "_ready"))) +
-        @as(usize, @intFromBool(@hasDecl(T, "_process"))) +
-        @as(usize, @intFromBool(@hasDecl(T, "_physics_process")));
+    var count: usize = 0;
+    inline for (callbacks) |cb| {
+        if (@hasDecl(T, cb.zig_name)) count += 1;
+    }
+    return count;
 }
 
 fn signalCount(comptime T: type) usize {
@@ -36,20 +58,50 @@ fn signalValueType(comptime T: type) abi.ValueType {
     return codec.valueType(T);
 }
 
-fn invoke0(instance: anytype, comptime name: []const u8) abi.Status {
-    const result = @call(.auto, @field(@TypeOf(instance.*), name), .{instance});
-    if (@typeInfo(@TypeOf(result)) == .error_union) {
-        _ = result catch return .script_error;
-    }
-    return .ok;
-}
+fn invokeGeneric(instance: anytype, comptime name: []const u8, arguments: ?[*]const abi.Value, comptime argument_count: u32) abi.Status {
+    const ScriptType = @TypeOf(instance.*);
+    const method_info = @typeInfo(@TypeOf(@field(ScriptType, name)));
+    if (method_info != .@"fn") return .method_not_found;
+    const params = method_info.@"fn".params;
+    if (params.len != argument_count + 1) return .invalid_argument;
 
-fn invokeDelta(instance: anytype, comptime name: []const u8, delta: f64) abi.Status {
-    const result = @call(.auto, @field(@TypeOf(instance.*), name), .{ instance, delta });
-    if (@typeInfo(@TypeOf(result)) == .error_union) {
-        _ = result catch return .script_error;
+    if (comptime argument_count == 0) {
+        const result = @call(.auto, @field(ScriptType, name), .{instance});
+        if (@typeInfo(@TypeOf(result)) == .error_union) {
+            _ = result catch return .script_error;
+        }
+        return .ok;
+    } else if (comptime argument_count == 1) {
+        const ArgType = params[1].type.?;
+        comptime {
+            if (std.mem.eql(u8, name, "process") or std.mem.eql(u8, name, "physicsProcess")) {
+                if (ArgType != f64 and ArgType != f32) {
+                    @compileError("callback " ++ name ++ " expects a float (f64 or f32) argument");
+                }
+            } else if (std.mem.eql(u8, name, "input") or
+                std.mem.eql(u8, name, "unhandledInput") or
+                std.mem.eql(u8, name, "shortcutInput") or
+                std.mem.eql(u8, name, "unhandledKeyInput") or
+                std.mem.eql(u8, name, "guiInput"))
+            {
+                if (!codec.isObjectType(ArgType)) {
+                    @compileError("callback " ++ name ++ " expects a Godot object argument");
+                }
+            }
+        }
+        const args = arguments orelse return .invalid_argument;
+        const arg = codec.fromValue(ArgType, &args[0]) catch |err| {
+            runtime.log.err("gzscript: failed to convert callback argument for {s}: {s}", .{ name, @errorName(err) });
+            return .type_mismatch;
+        };
+        const result = @call(.auto, @field(ScriptType, name), .{ instance, arg });
+        if (@typeInfo(@TypeOf(result)) == .error_union) {
+            _ = result catch return .script_error;
+        }
+        return .ok;
+    } else {
+        @compileError("Only callbacks with 0 or 1 arguments are supported currently");
     }
-    return .ok;
 }
 
 pub fn ScriptAdapter(comptime Script: type) type {
@@ -76,16 +128,11 @@ pub fn ScriptAdapter(comptime Script: type) type {
         fn buildMethods() [method_count]abi.MethodDescriptor {
             var result: [method_count]abi.MethodDescriptor = undefined;
             var index: usize = 0;
-            if (@hasDecl(Script, "_ready")) {
-                result[index] = .{ .name = .from("_ready"), .argument_count = 0 };
-                index += 1;
-            }
-            if (@hasDecl(Script, "_process")) {
-                result[index] = .{ .name = .from("_process"), .argument_count = 1 };
-                index += 1;
-            }
-            if (@hasDecl(Script, "_physics_process")) {
-                result[index] = .{ .name = .from("_physics_process"), .argument_count = 1 };
+            inline for (callbacks) |cb| {
+                if (@hasDecl(Script, cb.zig_name)) {
+                    result[index] = .{ .name = .from(cb.godot_name), .argument_count = cb.argument_count };
+                    index += 1;
+                }
             }
             return result;
         }
@@ -176,21 +223,12 @@ pub fn ScriptAdapter(comptime Script: type) type {
             _ = result;
             const raw = pointer orelse return .invalid_argument;
             const box: *Box = @ptrCast(@alignCast(raw));
-            if (std.mem.eql(u8, method.slice(), "_ready")) {
-                if (!@hasDecl(Script, "_ready") or argument_count != 0) return .method_not_found;
-                return invoke0(&box.script, "_ready");
-            }
-            if (std.mem.eql(u8, method.slice(), "_process")) {
-                if (!@hasDecl(Script, "_process") or argument_count != 1) return .method_not_found;
-                const args = arguments orelse return .invalid_argument;
-                if (args[0].type != .floating) return .type_mismatch;
-                return invokeDelta(&box.script, "_process", args[0].data.floating);
-            }
-            if (std.mem.eql(u8, method.slice(), "_physics_process")) {
-                if (!@hasDecl(Script, "_physics_process") or argument_count != 1) return .method_not_found;
-                const args = arguments orelse return .invalid_argument;
-                if (args[0].type != .floating) return .type_mismatch;
-                return invokeDelta(&box.script, "_physics_process", args[0].data.floating);
+            const name = method.slice();
+            inline for (callbacks) |cb| {
+                if (std.mem.eql(u8, name, cb.godot_name)) {
+                    if (!@hasDecl(Script, cb.zig_name) or argument_count != cb.argument_count) return .method_not_found;
+                    return invokeGeneric(&box.script, cb.zig_name, arguments, cb.argument_count);
+                }
             }
             return .method_not_found;
         }

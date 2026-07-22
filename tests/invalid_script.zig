@@ -9,7 +9,7 @@ pub fn init(ctx: gd.InitContext) !Self {
     return .{ .base = .{ .owner = ctx.owner } };
 }
 
-pub fn _process(self: *Self, delta: []const u8) !void {
+pub fn process(self: *Self, delta: []const u8) !void {
     _ = self;
     _ = delta;
 }
