@@ -41,11 +41,11 @@ constexpr const char *ADAPTER_SOURCE =
     ") void {\n"
     "    const color = switch (message_level) {\n"
     "        .err => \"red\",\n"
-    "        .warn => \"yellow\",\n"
-    "        .info => \"cyan\",\n"
-    "        .debug => \"gray\",\n"
+    "        .warn => \"gold\",\n"
+    "        .info => \"green\",\n"
+    "        .debug => \"cyan\",\n"
     "    };\n"
-    "    const prefix = \"[color=\" ++ color ++ \"]\" ++ \"[\" ++ @tagName(message_level) ++ \"/\" ++ @tagName(scope) ++ \"]\" ++ \"[/color] \";\n"
+    "    const prefix = \"[color=\" ++ color ++ \"]\" ++ \"[\" ++ @tagName(scope) ++ \"]\" ++ \"[/color] \";\n"
     "    gd.log.info(prefix ++ format, args);\n"
     "}\n";
 
