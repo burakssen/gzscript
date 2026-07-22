@@ -83,7 +83,7 @@ GzValue from_variant(const Variant &value) {
 }
 
 void log_info(GzStringView message) {
-  UtilityFunctions::print(from_view(message));
+  UtilityFunctions::print_rich(from_view(message));
 }
 
 void log_error(GzStringView message) {

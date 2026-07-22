@@ -1,4 +1,5 @@
 const gd = @import("godot");
+const std = @import("std");
 
 pub const Base = gd.Sprite2D;
 const Self = @This();
@@ -40,11 +41,11 @@ pub fn ready(self: *Self) !void {
 }
 
 pub fn enterTree(self: *Self) !void {
-    gd.log.info("Sprite2D enter tree", .{});
+    std.log.info("Sprite2D enter tree via std.log", .{});
     _ = self;
 }
 
 pub fn draw(self: *Self) !void {
-    gd.log.info("Sprite2D draw", .{});
+    std.log.info("Sprite2D draw via std.log", .{});
     _ = self;
 }

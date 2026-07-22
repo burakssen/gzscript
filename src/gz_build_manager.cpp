@@ -22,12 +22,31 @@ constexpr const char *ZIG_OPTIMIZATION_SETTING =
     "gzscript/compiler/optimization";
 constexpr const char *CACHE_FORMAT_VERSION = "2";
 constexpr const char *ADAPTER_SOURCE =
+    "const std = @import(\"std\");\n"
     "const gd = @import(\"godot\");\n"
     "const Script = @import(\"user_script\");\n"
     "const Adapter = gd.ScriptAdapter(Script);\n"
     "export fn gzscript_script_init(api: *const gd.abi.EngineApi, out: "
     "**const gd.abi.ScriptDescriptor) callconv(.c) gd.abi.Status {\n"
     "    return gd.initialize(api, out, &Adapter.descriptor);\n"
+    "}\n"
+    "pub const std_options = std.Options{\n"
+    "    .logFn = log,\n"
+    "};\n"
+    "pub fn log(\n"
+    "    comptime message_level: std.log.Level,\n"
+    "    comptime scope: @EnumLiteral(),\n"
+    "    comptime format: []const u8,\n"
+    "    args: anytype,\n"
+    ") void {\n"
+    "    const color = switch (message_level) {\n"
+    "        .err => \"red\",\n"
+    "        .warn => \"yellow\",\n"
+    "        .info => \"cyan\",\n"
+    "        .debug => \"gray\",\n"
+    "    };\n"
+    "    const prefix = \"[color=\" ++ color ++ \"]\" ++ \"[\" ++ @tagName(message_level) ++ \"/\" ++ @tagName(scope) ++ \"]\" ++ \"[/color] \";\n"
+    "    gd.log.info(prefix ++ format, args);\n"
     "}\n";
 
 String zig_path(const String &relative) {
