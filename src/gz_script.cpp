@@ -142,7 +142,8 @@ void append_properties(List<PropertyInfo> &result,
   }
 }
 
-// ponytail: use pre-cached StringName vector for property lookup without allocations
+// ponytail: use pre-cached StringName vector for property lookup without
+// allocations
 int property_index(InstanceData *data, const StringName &name) {
   const auto &prop_names = data->module->get_property_names();
   for (size_t i = 0; i < prop_names.size(); ++i) {
@@ -389,7 +390,10 @@ bool GzScript::_has_source_code() const { return true; }
 String GzScript::_get_source_code() const { return source; }
 void GzScript::_set_source_code(const String &code) { source = code; }
 
-Error GzScript::_reload(bool) {
+Error GzScript::_reload(bool keep_state) {
+  // Existing instances own their module version and are never mutated in place.
+  // keep_state is reserved for a future explicit state-migration protocol.
+  (void)keep_state;
   auto next = GzBuildManager::get_singleton()->compile(get_path(), source);
   if (!next) {
     valid = false;

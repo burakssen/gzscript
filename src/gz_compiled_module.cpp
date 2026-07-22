@@ -10,7 +10,6 @@
 #include <dlfcn.h>
 #endif
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -91,17 +90,18 @@ void log_error(GzStringView message) {
   UtilityFunctions::printerr(from_view(message));
 }
 
-// ponytail: thread-local StringName cache to eliminate string pool lookups per call
-static thread_local std::unordered_map<std::string_view, StringName> method_name_cache;
+// Own keys because method names can originate in unloadable script modules.
+static thread_local std::unordered_map<std::string, StringName>
+    method_name_cache;
 
 StringName get_cached_name(GzStringView view) {
-  std::string_view sv(view.ptr, view.len);
-  auto it = method_name_cache.find(sv);
+  std::string key(view.ptr, view.len);
+  auto it = method_name_cache.find(key);
   if (it != method_name_cache.end()) {
     return it->second;
   }
   StringName name(from_view(view));
-  method_name_cache.emplace(sv, name);
+  method_name_cache.emplace(std::move(key), name);
   return name;
 }
 
@@ -113,7 +113,8 @@ GzStatus object_call(uint64_t object_id, GzStringView method,
     return GZ_STATUS_INVALID_ARGUMENT;
   }
 
-  // ponytail: stack-allocate argument buffers up to 8 parameters to eliminate heap allocation
+  // ponytail: stack-allocate argument buffers up to 8 parameters to eliminate
+  // heap allocation
   constexpr uint32_t STACK_LIMIT = 8;
   Variant stack_values[STACK_LIMIT];
   const Variant *stack_pointers[STACK_LIMIT];
@@ -177,7 +178,7 @@ GzStatus object_emit_signal(uint64_t object_id, GzStringView signal,
 }
 
 void *get_method_bind(GzStringView class_name, GzStringView method_name,
-                       int64_t hash) {
+                      int64_t hash) {
   StringName c_name(from_view(class_name));
   StringName m_name(from_view(method_name));
   return (void *)::godot::gdextension_interface::classdb_get_method_bind(
@@ -191,13 +192,10 @@ GzStatus object_ptrcall(void *method_bind, uint64_t object_id,
     return GZ_STATUS_INVALID_ARGUMENT;
   }
   ::godot::gdextension_interface::object_method_bind_ptrcall(
-      (GDExtensionMethodBindPtr)method_bind,
-      object->_owner,
-      (GDExtensionConstTypePtr *)arguments,
-      (GDExtensionTypePtr)result);
+      (GDExtensionMethodBindPtr)method_bind, object->_owner,
+      (GDExtensionConstTypePtr *)arguments, (GDExtensionTypePtr)result);
   return GZ_STATUS_OK;
 }
-
 
 void close_library(void *handle) {
 #ifdef WINDOWS_ENABLED
@@ -236,7 +234,7 @@ GzScriptInit find_init(void *handle) {
 
 const GzEngineApi engine_api = {
     GZSCRIPT_ABI_VERSION, sizeof(GzEngineApi), log_info,        log_error,
-    object_call,          object_emit_signal, get_method_bind, object_ptrcall,
+    object_call,          object_emit_signal,  get_method_bind, object_ptrcall,
 };
 
 } // namespace
@@ -277,9 +275,11 @@ std::shared_ptr<GzCompiledModule> GzCompiledModule::load(const String &p_path,
   module->descriptor = descriptor;
   module->path = p_path;
 
-  // ponytail: pre-cache StringName for all properties to speed up instance_set and instance_get
+  // ponytail: pre-cache StringName for all properties to speed up instance_set
+  // and instance_get
   for (uint32_t i = 0; i < descriptor->property_count; ++i) {
-    module->property_names.push_back(StringName(from_view(descriptor->properties[i].name)));
+    module->property_names.push_back(
+        StringName(from_view(descriptor->properties[i].name)));
   }
 
   return module;

@@ -49,9 +49,9 @@ fn MethodCache(comptime class_name: []const u8, comptime method_name: []const u8
         const method = method_name;
         const method_hash = hash;
 
-        fn get() abi.MethodBind {
+        fn get() !abi.MethodBind {
             if (value == null) value = runtime.getMethodBind(class, method, method_hash);
-            return value.?;
+            return value orelse error.MethodBindNotFound;
         }
     };
 }
@@ -63,7 +63,7 @@ pub fn ptrcallMethodVoid(
     comptime hash: i64,
     arguments: anytype,
 ) !void {
-    return ptrcallVoid(self, MethodCache(class_name, method_name, hash).get(), arguments);
+    return ptrcallVoid(self, try MethodCache(class_name, method_name, hash).get(), arguments);
 }
 
 pub fn ptrcallMethod(
@@ -74,7 +74,7 @@ pub fn ptrcallMethod(
     comptime hash: i64,
     arguments: anytype,
 ) !T {
-    return ptrcall(self, T, MethodCache(class_name, method_name, hash).get(), arguments);
+    return ptrcall(self, T, try MethodCache(class_name, method_name, hash).get(), arguments);
 }
 
 pub fn ptrcall(self: anytype, comptime T: type, mb: abi.MethodBind, arguments: anytype) !T {
