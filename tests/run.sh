@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-zig build --prefix . -Doptimize=ReleaseFast
+zig build --prefix . -Doptimize=Debug
 zig build check-bindings
 zig build test
 zig fmt --check addons/gzscript/zig/*.zig examples/basic/scripts tests
@@ -15,10 +15,11 @@ run_godot() {
     "$godot_executable" --headless --path . "$@"
 }
 
-run_godot --editor --quit
+run_godot --import
 run_godot
 run_godot --script tests/live_bindings_runner.gd
 run_godot --script tests/save_runner.gd
+run_godot --script tests/cache_runner.gd
 run_godot --script tests/failure_runner.gd
 run_godot --script tests/benchmark_runner.gd
 

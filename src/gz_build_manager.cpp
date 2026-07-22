@@ -18,7 +18,17 @@ GzBuildManager *GzBuildManager::singleton = nullptr;
 
 namespace {
 constexpr const char *ZIG_PATH_SETTING = "gzscript/compiler/zig_path";
-
+constexpr const char *ZIG_OPTIMIZATION_SETTING =
+    "gzscript/compiler/optimization";
+constexpr const char *CACHE_FORMAT_VERSION = "2";
+constexpr const char *ADAPTER_SOURCE =
+    "const gd = @import(\"godot\");\n"
+    "const Script = @import(\"user_script\");\n"
+    "const Adapter = gd.ScriptAdapter(Script);\n"
+    "export fn gzscript_script_init(api: *const gd.abi.EngineApi, out: "
+    "**const gd.abi.ScriptDescriptor) callconv(.c) gd.abi.Status {\n"
+    "    return gd.initialize(api, out, &Adapter.descriptor);\n"
+    "}\n";
 
 String zig_path(const String &relative) {
   return ProjectSettings::get_singleton()->globalize_path(
@@ -28,6 +38,67 @@ String zig_path(const String &relative) {
 bool write_text(const String &path, const String &contents) {
   Ref<FileAccess> file = FileAccess::open(path, FileAccess::WRITE);
   return file.is_valid() && file->store_string(contents);
+}
+
+void append_identity(String &identity, const String &label,
+                     const String &value) {
+  identity += label + String(":") + String::num_int64(value.length()) +
+              String(":") + value + String("\n");
+}
+
+String joined_output(const Array &lines) {
+  String result;
+  for (int64_t i = 0; i < lines.size(); ++i) {
+    if (i > 0)
+      result += "\n";
+    result += String(lines[i]);
+  }
+  return result.strip_edges();
+}
+
+bool append_zig_tree(const String &root, const String &relative,
+                     String &fingerprint, String &error) {
+  String directory_path = relative.is_empty() ? root : root.path_join(relative);
+  Ref<DirAccess> directory = DirAccess::open(directory_path);
+  if (directory.is_null()) {
+    error = "Unable to read Zig source directory: " + directory_path;
+    return false;
+  }
+
+  PackedStringArray files = directory->get_files();
+  files.sort();
+  for (int64_t i = 0; i < files.size(); ++i) {
+    String file = files[i];
+    if (file.get_extension() != "zig")
+      continue;
+    String relative_path =
+        relative.is_empty() ? file : relative.path_join(file);
+    String hash = FileAccess::get_sha256(root.path_join(relative_path));
+    if (hash.is_empty()) {
+      error =
+          "Unable to fingerprint Zig source: " + root.path_join(relative_path);
+      return false;
+    }
+    append_identity(fingerprint, relative_path, hash);
+  }
+
+  PackedStringArray directories = directory->get_directories();
+  directories.sort();
+  for (int64_t i = 0; i < directories.size(); ++i) {
+    String child = directories[i];
+    if (child == ".godot" || child == ".zig-cache" || child == "zig-out")
+      continue;
+    String child_relative =
+        relative.is_empty() ? child : relative.path_join(child);
+    if (!append_zig_tree(root, child_relative, fingerprint, error))
+      return false;
+  }
+  return true;
+}
+
+bool valid_optimization(const String &optimization) {
+  return optimization == "Debug" || optimization == "ReleaseSafe" ||
+         optimization == "ReleaseFast" || optimization == "ReleaseSmall";
 }
 
 String platform_name() {
@@ -104,8 +175,20 @@ GzBuildManager::GzBuildManager() {
   zig_property_info["type"] = Variant::STRING;
   zig_property_info["hint"] = PROPERTY_HINT_GLOBAL_FILE;
   settings->add_property_info(zig_property_info);
-}
 
+  if (!settings->has_setting(ZIG_OPTIMIZATION_SETTING))
+    settings->set_setting(ZIG_OPTIMIZATION_SETTING, String("Debug"));
+  settings->set_initial_value(ZIG_OPTIMIZATION_SETTING, String("Debug"));
+  settings->set_as_basic(ZIG_OPTIMIZATION_SETTING, true);
+
+  Dictionary optimization_property_info;
+  optimization_property_info["name"] = ZIG_OPTIMIZATION_SETTING;
+  optimization_property_info["type"] = Variant::STRING;
+  optimization_property_info["hint"] = PROPERTY_HINT_ENUM;
+  optimization_property_info["hint_string"] =
+      "Debug,ReleaseSafe,ReleaseFast,ReleaseSmall";
+  settings->add_property_info(optimization_property_info);
+}
 
 GzBuildManager::~GzBuildManager() {
   if (singleton == this) {
@@ -115,6 +198,7 @@ GzBuildManager::~GzBuildManager() {
 
 std::shared_ptr<GzCompiledModule>
 GzBuildManager::compile(const String &resource_path, const String &source) {
+  last_diagnostics = String();
   String project_root =
       ProjectSettings::get_singleton()->globalize_path("res://");
   String cache_root = project_root.path_join(".godot/gzscript");
@@ -132,23 +216,6 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
   DirAccess::make_dir_recursive_absolute(cache_root.path_join("generated"));
   DirAccess::make_dir_recursive_absolute(module_directory);
 
-  String sdk_fingerprint;
-  const char *sdk_files[] = {
-      "abi.zig",           "adapter.zig", "class.zig",
-      "class_support.zig", "codec.zig",   "godot.zig",
-      "property.zig",      "runtime.zig", "signal.zig",
-  };
-  for (const char *file : sdk_files)
-    sdk_fingerprint += FileAccess::get_file_as_string(
-        "res://addons/gzscript/zig/" + String(file));
-  String key =
-      (source + sdk_fingerprint + String::num_int64(GZSCRIPT_ABI_VERSION) +
-       platform + architecture + OS::get_singleton()->get_version() +
-       "zig-0.16.0")
-          .sha256_text()
-          .substr(0, 16);
-  String generated = cache_root.path_join("generated/script_" + key + ".zig");
-  String output = module_directory.path_join("script_" + key + extension);
   String source_path =
       ProjectSettings::get_singleton()->globalize_path(resource_path);
   if (!FileAccess::file_exists(source_path)) {
@@ -156,27 +223,83 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
     return {};
   }
-  {
-    String adapter =
-        "const gd = @import(\"godot\");\n"
-        "const Script = @import(\"user_script\");\n"
-        "const Adapter = gd.ScriptAdapter(Script);\n"
-        "export fn gzscript_script_init(api: *const gd.abi.EngineApi, out: "
-        "**const gd.abi.ScriptDescriptor) callconv(.c) gd.abi.Status {\n"
-        "    return gd.initialize(api, out, &Adapter.descriptor);\n"
-        "}\n";
-    if (!write_text(generated, adapter)) {
-      last_diagnostics = "Unable to write generated Zig adapter";
-      return {};
-    }
+  if (FileAccess::get_file_as_string(source_path) != source) {
+    last_diagnostics = "Zig source for " + resource_path +
+                       " does not match the file on disk; save it before "
+                       "compiling";
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
   }
 
+  ProjectSettings *settings = ProjectSettings::get_singleton();
+  String optimization =
+      settings->get_setting(ZIG_OPTIMIZATION_SETTING, String("Debug"));
+  if (!valid_optimization(optimization)) {
+    last_diagnostics = "Unsupported Zig optimization mode: " + optimization;
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
+  }
+
+  String zig_executable = get_zig_executable();
+  Array version_output;
+  int version_exit = OS::get_singleton()->execute(
+      zig_executable, PackedStringArray({"version"}), version_output, true);
+  String zig_version = joined_output(version_output);
+  if (version_exit != 0 || zig_version.is_empty()) {
+    last_diagnostics = "Unable to query Zig compiler version from " +
+                       zig_executable + " (exit " +
+                       String::num_int64(version_exit) + ")";
+    if (!zig_version.is_empty())
+      last_diagnostics += "\n" + zig_version;
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
+  }
+
+  String user_fingerprint;
+  String fingerprint_error;
+  if (!append_zig_tree(source_path.get_base_dir(), String(), user_fingerprint,
+                       fingerprint_error)) {
+    last_diagnostics = fingerprint_error;
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
+  }
+  String sdk_fingerprint;
+  String sdk_root = zig_path(String());
+  if (!append_zig_tree(sdk_root, String(), sdk_fingerprint,
+                       fingerprint_error)) {
+    last_diagnostics = fingerprint_error;
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
+  }
+
+  String identity;
+  append_identity(identity, "cache_format", CACHE_FORMAT_VERSION);
+  append_identity(identity, "resource_path", source_path.simplify_path());
+  append_identity(identity, "source", source);
+  append_identity(identity, "user_tree", user_fingerprint);
+  append_identity(identity, "sdk_tree", sdk_fingerprint);
+  append_identity(identity, "adapter", ADAPTER_SOURCE);
+  append_identity(identity, "abi", String::num_int64(GZSCRIPT_ABI_VERSION));
+  append_identity(identity, "zig_executable", zig_executable);
+  append_identity(identity, "zig_version", zig_version);
+  append_identity(identity, "platform", platform);
+  append_identity(identity, "architecture", architecture);
+  append_identity(identity, "optimization", optimization);
+  String key = identity.sha256_text();
+  String generated = cache_root.path_join("generated/script_" + key + ".zig");
+  String output = module_directory.path_join("script_" + key + extension);
+
   if (!FileAccess::file_exists(output)) {
+    if (!write_text(generated, ADAPTER_SOURCE)) {
+      last_diagnostics = "Unable to write generated Zig adapter: " + generated;
+      UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+      return {};
+    }
     PackedStringArray arguments;
     arguments.push_back("build-lib");
     arguments.push_back("-dynamic");
     arguments.push_back("-O");
-    arguments.push_back("Debug");
+    arguments.push_back(optimization);
     arguments.push_back("-femit-bin=" + output);
     arguments.push_back("--dep");
     arguments.push_back("godot");
@@ -189,16 +312,20 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
     arguments.push_back("-Mgodot=" + zig_path("godot.zig"));
 
     Array output_lines;
-    int exit_code = OS::get_singleton()->execute(get_zig_executable(), arguments,
+    int exit_code = OS::get_singleton()->execute(zig_executable, arguments,
                                                  output_lines, true);
-    last_diagnostics =
-        output_lines.is_empty() ? String() : String(output_lines[0]);
+    last_diagnostics = joined_output(output_lines);
     if (exit_code != 0) {
       DirAccess::remove_absolute(output);
-      UtilityFunctions::printerr("gzscript: compilation failed for ",
-                                 resource_path, "\n", last_diagnostics);
+      last_diagnostics =
+          "Compilation failed for " + resource_path + " (exit " +
+          String::num_int64(exit_code) + ")" +
+          (last_diagnostics.is_empty() ? String()
+                                       : String("\n") + last_diagnostics);
+      UtilityFunctions::printerr("gzscript: ", last_diagnostics);
       return {};
     }
+    last_diagnostics = String();
   }
 
   String error;
@@ -208,6 +335,7 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
     last_diagnostics = error;
     UtilityFunctions::printerr("gzscript: ", error);
   } else {
+    last_diagnostics = String();
     emit_signal("script_compiled");
   }
   return module;
