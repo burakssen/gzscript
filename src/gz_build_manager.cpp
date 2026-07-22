@@ -115,6 +115,10 @@ bool append_zig_tree(const String &root, const String &relative,
   return true;
 }
 
+String normalize_source(const String &str) {
+  return str.replace("\r\n", "\n").strip_edges();
+}
+
 bool valid_optimization(const String &optimization) {
   return optimization == "Debug" || optimization == "ReleaseSafe" ||
          optimization == "ReleaseFast" || optimization == "ReleaseSmall";
@@ -242,7 +246,7 @@ GzBuildManager::compile(const String &resource_path, const String &source) {
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
     return {};
   }
-  if (FileAccess::get_file_as_string(source_path) != source) {
+  if (normalize_source(FileAccess::get_file_as_string(source_path)) != normalize_source(source)) {
     last_diagnostics = "Zig source for " + resource_path +
                        " does not match the file on disk; save it before "
                        "compiling";
