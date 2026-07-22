@@ -309,6 +309,7 @@ GDExtensionScriptLanguagePtr instance_get_language(void *) {
 
 void instance_free(void *pointer) {
   auto *data = static_cast<InstanceData *>(pointer);
+  data->script->instances.erase(pointer);
   data->module->get_descriptor()->destroy_instance(data->zig_instance);
   delete data;
 }
@@ -369,6 +370,7 @@ void *GzScript::_instance_create(Object *owner) const {
     delete data;
     return nullptr;
   }
+  instances.insert(data);
   return gdextension_interface::script_instance_create3(&instance_info, data);
 }
 
@@ -400,6 +402,15 @@ Error GzScript::_reload(bool keep_state) {
     emit_changed();
     return ERR_COMPILATION_FAILED;
   }
+
+  // Recreate all active instances with the new module version
+  for (void *ptr : instances) {
+    auto *data = static_cast<InstanceData *>(ptr);
+    data->module->get_descriptor()->destroy_instance(data->zig_instance);
+    data->module = next;
+    data->module->get_descriptor()->create_instance(data->owner->get_instance_id(), &data->zig_instance);
+  }
+
   module = std::move(next);
   valid = true;
   _update_exports();

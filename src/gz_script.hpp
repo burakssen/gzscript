@@ -21,6 +21,7 @@ protected:
   static void _bind_methods();
 
 public:
+  mutable std::unordered_set<void *> instances;
   GzScript();
   ~GzScript();
   static const std::unordered_set<GzScript *> &get_scripts() { return scripts; }
