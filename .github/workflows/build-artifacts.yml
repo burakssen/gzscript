@@ -99,9 +99,45 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  integration:
+    name: Godot 4.7 integration (Linux x86_64)
+    needs: bindings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Zig 0.16.0
+        run: sh .github/scripts/install-zig.sh
+
+      - name: Install Godot 4.7 stable
+        run: |
+          archive="$RUNNER_TEMP/godot.zip"
+          install_dir="$RUNNER_TEMP/godot"
+          bin_dir="$RUNNER_TEMP/bin"
+
+          curl -fsSLo "$archive" \
+            "https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip"
+          printf '%s  %s\n' \
+            '0b1a6c54c2c619c12e169fe9241edda4b81080b519451cec2984bf0d2c6cb73c' \
+            "$archive" | sha256sum -c -
+
+          mkdir -p "$install_dir" "$bin_dir"
+          unzip -q "$archive" -d "$install_dir"
+          install -m 755 \
+            "$install_dir/Godot_v4.7-stable_linux.x86_64" \
+            "$bin_dir/godot"
+          "$bin_dir/godot" --version
+          printf '%s\n' "$bin_dir" >> "$GITHUB_PATH"
+
+      - name: Run integration suite
+        run: sh tests/run.sh
+
   package:
     name: Package combined artifact
-    needs: build
+    needs: [build, integration]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
