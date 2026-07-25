@@ -27,6 +27,7 @@ namespace
     Ref<GzScript> script;
     std::shared_ptr<GzCompiledModule> module;
     void *zig_instance = nullptr;
+    std::vector<Variant> retained_objects;
   };
 
   MethodInfo signal_method_info(const GzSignalDescriptor &signal)
@@ -45,15 +46,17 @@ namespace
   void append_properties(List<PropertyInfo> &result,
                          const GzScriptDescriptor *descriptor)
   {
+    String current_category;
     for (uint32_t i = 0; i < descriptor->property_count; ++i)
     {
       const GzPropertyDescriptor &property = descriptor->properties[i];
-      if (property.category.len > 0)
+      String category = gzscript::from_view(property.category);
+      if (!category.is_empty() && category != current_category)
       {
         result.push_back(
-            PropertyInfo(Variant::NIL,
-                         StringName(gzscript::from_view(property.category)),
+            PropertyInfo(Variant::NIL, StringName(category),
                          PROPERTY_HINT_NONE, "", PROPERTY_USAGE_CATEGORY));
+        current_category = category;
       }
       PropertyHint godot_hint = static_cast<PropertyHint>(property.hint);
       String hint_str;
@@ -70,7 +73,8 @@ namespace
       result.push_back(PropertyInfo(
           gzscript::variant_type(property.type),
           StringName(gzscript::from_view(property.name)),
-          godot_hint, hint_str));
+          godot_hint, hint_str, PROPERTY_USAGE_DEFAULT,
+          StringName(gzscript::from_view(property.class_name))));
     }
   }
 
@@ -86,6 +90,40 @@ namespace
     return -1;
   }
 
+  void sync_retained_objects(InstanceData *data)
+  {
+    const GzScriptDescriptor *descriptor = data->module->get_descriptor();
+    for (uint32_t i = 0; i < descriptor->property_count; ++i)
+    {
+      if (descriptor->properties[i].type != GZ_VALUE_OBJECT)
+        continue;
+      GzValue value{};
+      if (descriptor->get_property(data->zig_instance, i, &value) !=
+          GZ_STATUS_OK)
+        continue;
+      bool valid = false;
+      Variant object = gzscript::to_variant(value, &valid);
+      if (!valid)
+        continue;
+      Object *instance = object;
+      StringName expected(gzscript::from_view(
+          descriptor->properties[i].class_name));
+      if (instance && !expected.is_empty() && !instance->is_class(expected))
+      {
+        GzValue previous{};
+        previous.type = GZ_VALUE_OBJECT;
+        Object *retained = data->retained_objects[i];
+        previous.data.object_id = retained ? retained->get_instance_id() : 0;
+        descriptor->set_property(data->zig_instance, i, &previous);
+        UtilityFunctions::printerr(
+            "gzscript: script assigned an incompatible object to ",
+            gzscript::from_view(descriptor->properties[i].name));
+        continue;
+      }
+      data->retained_objects[i] = object;
+    }
+  }
+
   GDExtensionBool instance_set(void *pointer, GDExtensionConstStringNamePtr name,
                                GDExtensionConstVariantPtr value)
   {
@@ -93,14 +131,28 @@ namespace
     int index = property_index(data, *reinterpret_cast<const StringName *>(name));
     if (index < 0)
       return false;
+    const Variant &incoming = *reinterpret_cast<const Variant *>(value);
+    const GzPropertyDescriptor &property =
+        data->module->get_descriptor()->properties[index];
+    if (property.type == GZ_VALUE_OBJECT && incoming.get_type() != Variant::NIL)
+    {
+      Object *object = incoming;
+      StringName expected(gzscript::from_view(property.class_name));
+      if (!object || (!expected.is_empty() && !object->is_class(expected)))
+        return false;
+    }
     CharString string_storage;
     bool valid = false;
-    GzValue converted = gzscript::from_variant(
-        *reinterpret_cast<const Variant *>(value), &string_storage, &valid);
+    GzValue converted =
+        gzscript::from_variant(incoming, &string_storage, &valid);
     if (!valid)
       return false;
-    return data->module->get_descriptor()->set_property(
-               data->zig_instance, index, &converted) == GZ_STATUS_OK;
+    if (data->module->get_descriptor()->set_property(
+            data->zig_instance, index, &converted) != GZ_STATUS_OK)
+      return false;
+    if (property.type == GZ_VALUE_OBJECT)
+      data->retained_objects[index] = incoming;
+    return true;
   }
 
   GDExtensionBool instance_get(void *pointer, GDExtensionConstStringNamePtr name,
@@ -237,6 +289,7 @@ namespace
         data->zig_instance,
         {method_name.get_data(), static_cast<size_t>(method_name.length())},
         values.empty() ? nullptr : values.data(), argument_count, &return_value);
+    sync_retained_objects(data);
     if (status == GZ_STATUS_OK)
     {
       bool valid = false;
@@ -263,6 +316,7 @@ namespace
     auto *data = static_cast<InstanceData *>(pointer);
     data->module->get_descriptor()->notification(data->zig_instance, what,
                                                  reversed);
+    sync_retained_objects(data);
   }
 
   void instance_to_string(void *, GDExtensionBool *valid,
@@ -347,12 +401,14 @@ void *GzScript::_instance_create(Object *owner) const
   data->owner = owner;
   data->script = Ref<GzScript>(const_cast<GzScript *>(this));
   data->module = module;
+  data->retained_objects.resize(module->get_descriptor()->property_count);
   if (module->get_descriptor()->create_instance(
           owner->get_instance_id(), &data->zig_instance) != GZ_STATUS_OK)
   {
     delete data;
     return nullptr;
   }
+  sync_retained_objects(data);
   instances.insert(data);
   return gdextension_interface::script_instance_create3(&instance_info, data);
 }

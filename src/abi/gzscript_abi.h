@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define GZSCRIPT_ABI_VERSION 3u
+#define GZSCRIPT_ABI_VERSION 4u
 
 typedef struct {
   const char *ptr;
@@ -146,11 +146,20 @@ typedef struct {
   uint32_t hint;
   GzStringView hint_string;
   GzStringView category;
+  GzStringView class_name;
   double range_min;
   double range_max;
   double range_step;
   GzValue default_value;
 } GzPropertyDescriptor;
+
+#ifdef __cplusplus
+static_assert(sizeof(GzPropertyDescriptor) == 152 &&
+                  alignof(GzPropertyDescriptor) == 8 &&
+                  offsetof(GzPropertyDescriptor, class_name) == 56 &&
+                  offsetof(GzPropertyDescriptor, default_value) == 96,
+              "Unexpected GzPropertyDescriptor ABI layout");
+#endif
 
 typedef struct {
   GzStringView name;
@@ -177,12 +186,13 @@ typedef struct {
   void *(*get_method_bind)(GzStringView class_name, GzStringView method_name,
                            int64_t hash);
   GzStatus (*object_ptrcall)(void *method_bind, uint64_t object_id,
-                             const void *const *arguments, void *result);
+                              const void *const *arguments, void *result);
+  uint64_t (*get_ticks_usec)(void);
 } GzEngineApi;
 
 #ifdef __cplusplus
-static_assert(sizeof(GzEngineApi) == 56 && alignof(GzEngineApi) == 8 &&
-                  offsetof(GzEngineApi, object_call) == 24,
+static_assert(sizeof(GzEngineApi) == 64 && alignof(GzEngineApi) == 8 &&
+                   offsetof(GzEngineApi, object_call) == 24,
               "Unexpected GzEngineApi ABI layout");
 #endif
 

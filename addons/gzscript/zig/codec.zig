@@ -156,6 +156,11 @@ pub fn valueType(comptime T: type) abi.ValueType {
         @compileError("unsupported ABI value type: " ++ @typeName(T));
 }
 
+pub fn objectClassName(comptime T: type) []const u8 {
+    const Value = optionalChild(T) orelse T;
+    return if (comptime isObjectType(Value)) Value.godot_class else "";
+}
+
 pub fn toValue(value: anytype) abi.Value {
     const T = @TypeOf(value);
     if (optionalChild(T)) |Child| {

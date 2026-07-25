@@ -8,12 +8,14 @@ base: Base,
 some_enum: i64 = 0,
 some_file: []const u8 = "",
 some_text: []const u8 = "",
+held_texture: ?gd.Texture2D = null,
 enter_tree_notification_received: bool = false,
 
 pub const exports = .{
-    .some_enum = gd.property(.{ .hint = .@"enum", .hint_string = "First,Second,Third" }),
-    .some_file = gd.property(.{ .hint = .file, .hint_string = "*.zig" }),
+    .some_enum = gd.property(.{ .category = "Metadata", .hint = .@"enum", .hint_string = "First,Second,Third" }),
+    .some_file = gd.property(.{ .category = "Metadata", .hint = .file, .hint_string = "*.zig" }),
     .some_text = gd.property(.{ .hint = .multiline_text }),
+    .held_texture = gd.property(.{}),
 };
 
 pub const signals = .{
@@ -26,13 +28,20 @@ pub fn init(ctx: gd.InitContext) !Self {
         .some_enum = 0,
         .some_file = "",
         .some_text = "",
+        .held_texture = null,
         .enter_tree_notification_received = false,
     };
 }
 
-pub fn notification(self: *Self, what: i32) void {
+pub fn notification(self: *Self, what: i32) !void {
     if (what == 10) { // NOTIFICATION_ENTER_TREE = 10
         self.enter_tree_notification_received = true;
+    } else if (what == 9001) {
+        self.held_texture = null;
+    } else if (what == 9002) {
+        self.held_texture = try self.base.getTexture();
+    } else if (what == 9003) {
+        self.held_texture = .{ .owner = self.base.owner };
     }
 }
 

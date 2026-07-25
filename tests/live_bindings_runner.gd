@@ -98,13 +98,47 @@ func _run() -> void:
 		return
 	if not _check(not sprite_probe.centered and sprite_probe.flip_h, "Sprite2D property mismatch"):
 		return
+	var wrong_object := Node.new()
+	sprite_probe.set("held_texture", wrong_object)
+	if not _check(sprite_probe.get("held_texture") == null, "Object export accepted the wrong Godot class"):
+		wrong_object.free()
+		return
+	wrong_object.free()
+	var texture := ImageTexture.new()
+	var weak_texture: WeakRef = weakref(texture)
+	sprite_probe.set("held_texture", texture)
+	texture = null
+	if not _check(weak_texture.get_ref() != null, "Object export did not retain a RefCounted value"):
+		return
+	sprite_probe.set("held_texture", null)
+	await process_frame
+	if not _check(weak_texture.get_ref() == null, "Clearing an object export did not release its retained value"):
+		return
+	texture = ImageTexture.new()
+	weak_texture = weakref(texture)
+	sprite_probe.texture = texture
+	texture = null
+	sprite_probe.notification(9002)
+	sprite_probe.texture = null
+	if not _check(weak_texture.get_ref() != null, "Script-side object assignment did not retain its value"):
+		return
+	sprite_probe.notification(9003)
+	if not _check(sprite_probe.get("held_texture") == weak_texture.get_ref(), "Script-side object assignment bypassed class validation"):
+		return
+	sprite_probe.notification(9001)
+	await process_frame
+	if not _check(weak_texture.get_ref() == null, "Script-side object clearing did not release its retained value"):
+		return
 
 	var sprite_props := sprite_script.get_script_property_list()
 	var enum_prop := {}
 	var file_prop := {}
 	var text_prop := {}
+	var metadata_categories := 0
 	for prop in sprite_props:
-		if prop.name == "some_enum":
+		if prop.name == "Metadata" and prop.usage == PROPERTY_USAGE_CATEGORY:
+			metadata_categories += 1
+		elif prop.name == "some_enum":
 			enum_prop = prop
 		elif prop.name == "some_file":
 			file_prop = prop
@@ -120,6 +154,8 @@ func _run() -> void:
 	if not _check(file_prop.hint == PROPERTY_HINT_FILE and file_prop.hint_string == "*.zig", "some_file hint mismatch"):
 		return
 	if not _check(text_prop.size() > 0, "some_text property not found"):
+		return
+	if not _check(metadata_categories == 1, "Repeated export categories produced duplicate Inspector headings"):
 		return
 	if not _check(text_prop.hint == PROPERTY_HINT_MULTILINE_TEXT, "some_text hint mismatch"):
 		return

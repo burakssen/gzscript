@@ -2,6 +2,7 @@
 #include "gz_value_codec.hpp"
 
 #include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -158,6 +159,8 @@ GzStatus object_ptrcall(void *method_bind, uint64_t object_id,
   return GZ_STATUS_OK;
 }
 
+uint64_t get_ticks_usec() { return Time::get_singleton()->get_ticks_usec(); }
+
 void close_library(void *handle) {
 #ifdef WINDOWS_ENABLED
   FreeLibrary(reinterpret_cast<HMODULE>(handle));
@@ -196,6 +199,7 @@ GzScriptInit find_init(void *handle) {
 const GzEngineApi engine_api = {
     GZSCRIPT_ABI_VERSION, sizeof(GzEngineApi), log_info,        log_error,
     object_call,          object_emit_signal,  get_method_bind, object_ptrcall,
+    get_ticks_usec,
 };
 
 } // namespace

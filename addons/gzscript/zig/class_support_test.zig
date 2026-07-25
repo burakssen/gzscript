@@ -26,6 +26,9 @@ fn ptrcall(_: abi.MethodBind, _: u64, _: ?[*]const ?*const anyopaque, result: ?*
     if (result) |pointer| @as(*bool, @ptrCast(@alignCast(pointer))).* = true;
     return .ok;
 }
+fn zeroTicks() callconv(.c) u64 {
+    return 0;
+}
 
 const engine_api = abi.EngineApi{
     .abi_version = abi.abi_version,
@@ -36,6 +39,7 @@ const engine_api = abi.EngineApi{
     .object_emit_signal = discardSignal,
     .get_method_bind = getMethodBind,
     .object_ptrcall = ptrcall,
+    .get_ticks_usec = zeroTicks,
 };
 
 test "cached ptrcall resolves each method metadata tuple once" {

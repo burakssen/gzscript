@@ -1,4 +1,4 @@
-pub const abi_version: u32 = 3;
+pub const abi_version: u32 = 4;
 
 pub const StringView = extern struct {
     ptr: [*]const u8,
@@ -107,6 +107,7 @@ pub const PropertyDescriptor = extern struct {
     hint: PropertyHint,
     hint_string: StringView,
     category: StringView,
+    class_name: StringView,
     range_min: f64,
     range_max: f64,
     range_step: f64,
@@ -135,6 +136,7 @@ pub const EngineApi = extern struct {
     object_emit_signal: *const fn (u64, StringView, ?[*]const Value, u32) callconv(.c) Status,
     get_method_bind: *const fn (StringView, StringView, i64) callconv(.c) MethodBind,
     object_ptrcall: *const fn (MethodBind, u64, ?[*]const ?*const anyopaque, ?*anyopaque) callconv(.c) Status,
+    get_ticks_usec: *const fn () callconv(.c) u64,
 };
 
 pub const ScriptDescriptor = extern struct {

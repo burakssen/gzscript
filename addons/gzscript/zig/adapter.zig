@@ -68,7 +68,10 @@ fn invokeGeneric(instance: anytype, comptime name: []const u8, arguments: ?[*]co
     if (comptime argument_count == 0) {
         const result = @call(.auto, @field(ScriptType, name), .{instance});
         if (@typeInfo(@TypeOf(result)) == .error_union) {
-            _ = result catch return .script_error;
+            _ = result catch |err| {
+                runtime.log.err("gzscript: callback {s}: {s}", .{ name, @errorName(err) });
+                return .script_error;
+            };
         }
         return .ok;
     } else if (comptime argument_count == 1) {
@@ -96,7 +99,10 @@ fn invokeGeneric(instance: anytype, comptime name: []const u8, arguments: ?[*]co
         };
         const result = @call(.auto, @field(ScriptType, name), .{ instance, arg });
         if (@typeInfo(@TypeOf(result)) == .error_union) {
-            _ = result catch return .script_error;
+            _ = result catch |err| {
+                runtime.log.err("gzscript: callback {s}: {s}", .{ name, @errorName(err) });
+                return .script_error;
+            };
         }
         return .ok;
     } else {
@@ -107,6 +113,7 @@ fn invokeGeneric(instance: anytype, comptime name: []const u8, arguments: ?[*]co
 pub fn ScriptAdapter(comptime Script: type) type {
     if (!@hasDecl(Script, "Base")) @compileError("Zig script must declare pub const Base");
     if (!@hasField(Script, "base")) @compileError("Zig script must contain a base field");
+    if (@FieldType(Script, "base") != Script.Base) @compileError("Zig script base field must have type Script.Base");
     if (!@hasDecl(Script, "init")) @compileError("Zig script must declare pub fn init(ctx: gd.InitContext) !Self");
 
     const export_count = if (@hasDecl(Script, "exports")) @typeInfo(@TypeOf(Script.exports)).@"struct".fields.len else 0;
@@ -158,6 +165,7 @@ pub fn ScriptAdapter(comptime Script: type) type {
                     .hint = options.hint,
                     .hint_string = .from(options.hint_string),
                     .category = .from(options.category),
+                    .class_name = .from(codec.objectClassName(field.type)),
                     .range_min = if (options.range) |range| range.min else 0,
                     .range_max = if (options.range) |range| range.max else 0,
                     .range_step = if (options.range) |range| range.step else 0,

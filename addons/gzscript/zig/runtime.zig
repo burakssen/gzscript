@@ -63,3 +63,8 @@ pub fn ptrcall(method_bind: abi.MethodBind, object_id: u64, args: ?[*]const ?*co
     const status = api.object_ptrcall(method_bind, object_id, args, result);
     if (status != .ok) return error.PtrCallFailed;
 }
+
+pub fn getTicksUsec() u64 {
+    const api = engine_api orelse return 0;
+    return api.get_ticks_usec();
+}

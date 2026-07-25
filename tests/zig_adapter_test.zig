@@ -13,12 +13,24 @@ const OwnerOnly = extern struct {
 
 fn discardLog(_: gd.abi.StringView) callconv(.c) void {}
 
+var captured_error: [256]u8 = undefined;
+var captured_error_len: usize = 0;
+
+fn captureError(message: gd.abi.StringView) callconv(.c) void {
+    captured_error_len = @min(message.len, captured_error.len);
+    @memcpy(captured_error[0..captured_error_len], message.slice()[0..captured_error_len]);
+}
+
 fn missingMethodCall(_: u64, _: gd.abi.StringView, _: ?[*]const gd.abi.Value, _: u32, _: *gd.abi.Value) callconv(.c) gd.abi.Status {
     return .method_not_found;
 }
 
 fn discardSignal(_: u64, _: gd.abi.StringView, _: ?[*]const gd.abi.Value, _: u32) callconv(.c) gd.abi.Status {
     return .ok;
+}
+
+fn zeroTicks() callconv(.c) u64 {
+    return 0;
 }
 
 const TestScript = struct {
@@ -55,6 +67,44 @@ const TestScript = struct {
     }
 };
 
+const ErrorScript = struct {
+    pub const Base = gd.Node;
+    const Self = @This();
+
+    base: Base,
+
+    pub fn init(ctx: gd.InitContext) !Self {
+        return .{ .base = .{ .owner = ctx.owner } };
+    }
+
+    pub fn ready(_: *Self) !void {
+        return error.ReadyFailed;
+    }
+};
+
+test "adapter logs callback error names" {
+    captured_error_len = 0;
+    var api = gd.abi.EngineApi{
+        .abi_version = gd.abi.abi_version,
+        .struct_size = @sizeOf(gd.abi.EngineApi),
+        .log_info = discardLog,
+        .log_error = captureError,
+        .object_call = missingMethodCall,
+        .object_emit_signal = discardSignal,
+        .get_method_bind = undefined,
+        .object_ptrcall = undefined,
+        .get_ticks_usec = zeroTicks,
+    };
+    var descriptor: *const gd.abi.ScriptDescriptor = undefined;
+    try std.testing.expectEqual(gd.abi.Status.ok, gd.initialize(&api, &descriptor, &gd.ScriptAdapter(ErrorScript).descriptor));
+    var instance: ?*anyopaque = null;
+    try std.testing.expectEqual(gd.abi.Status.ok, descriptor.create_instance(1, &instance));
+    defer descriptor.destroy_instance(instance);
+    var result = gd.abi.Value{};
+    try std.testing.expectEqual(gd.abi.Status.script_error, descriptor.call_method(instance, .from("_ready"), null, 0, &result));
+    try std.testing.expect(std.mem.indexOf(u8, captured_error[0..captured_error_len], "ready: ReadyFailed") != null);
+}
+
 test "adapter dispatches callbacks: ready, process, input" {
     var api = gd.abi.EngineApi{
         .abi_version = gd.abi.abi_version,
@@ -65,6 +115,7 @@ test "adapter dispatches callbacks: ready, process, input" {
         .object_emit_signal = discardSignal,
         .get_method_bind = undefined,
         .object_ptrcall = undefined,
+        .get_ticks_usec = zeroTicks,
     };
 
     var descriptor: *const gd.abi.ScriptDescriptor = undefined;
@@ -121,6 +172,20 @@ test "adapter reflects explicit exports only" {
     try std.testing.expectEqualStrings("Node2D", descriptor.base_class.slice());
 }
 
+test "adapter reflects exported object classes" {
+    const Script = struct {
+        pub const Base = gd.Node;
+        base: Base,
+        texture: ?gd.Texture2D = null,
+        pub const exports = .{ .texture = gd.property(.{}) };
+        pub fn init(ctx: gd.InitContext) !@This() {
+            return .{ .base = .{ .owner = ctx.owner } };
+        }
+    };
+    const descriptor = gd.ScriptAdapter(Script).descriptor;
+    try std.testing.expectEqualStrings("Texture2D", descriptor.properties.?[0].class_name.slice());
+}
+
 test "adapter reflects signal declarations" {
     const descriptor = gd.ScriptAdapter(TestScript).descriptor;
     try std.testing.expectEqual(@as(u32, 2), descriptor.signal_count);
@@ -139,7 +204,7 @@ test "2D wrappers expose typed position methods" {
     try std.testing.expect(@hasDecl(gd.Sprite2D, "getPosition"));
 }
 
-test "ABI v3 layouts remain stable" {
+test "ABI v4 layouts remain stable" {
     try std.testing.expectEqual(@as(u32, 0), @intFromEnum(gd.abi.ValueType.nil));
     try std.testing.expectEqual(@as(u32, 1), @intFromEnum(gd.abi.ValueType.boolean));
     try std.testing.expectEqual(@as(u32, 2), @intFromEnum(gd.abi.ValueType.integer));
@@ -159,7 +224,8 @@ test "ABI v3 layouts remain stable" {
 
     try std.testing.expectEqual(@as(usize, 48), @sizeOf(gd.abi.ValueData));
     try std.testing.expectEqual(@as(usize, 56), @sizeOf(gd.abi.Value));
-    try std.testing.expectEqual(@as(usize, 56), @sizeOf(gd.abi.EngineApi));
+    try std.testing.expectEqual(@as(usize, 64), @sizeOf(gd.abi.EngineApi));
+    try std.testing.expectEqual(@as(usize, 152), @sizeOf(gd.abi.PropertyDescriptor));
     try std.testing.expectEqual(@as(usize, 120), @sizeOf(gd.abi.ScriptDescriptor));
 
     try std.testing.expectEqual(@as(usize, 8), @alignOf(gd.abi.Value));
@@ -235,6 +301,7 @@ test "runtime preserves engine call errors" {
         .object_emit_signal = discardSignal,
         .get_method_bind = discardGetMethodBind,
         .object_ptrcall = discardPtrcall,
+        .get_ticks_usec = zeroTicks,
     };
 
     var descriptor: *const gd.abi.ScriptDescriptor = undefined;

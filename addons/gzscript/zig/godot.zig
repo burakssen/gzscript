@@ -13,6 +13,7 @@ pub const signal = signals.signal;
 pub const InitContext = runtime.InitContext;
 pub const Object = runtime.Object;
 pub const log = runtime.log;
+pub const getTicksUsec = runtime.getTicksUsec;
 pub const Vector = abi.Vector;
 pub const Color = abi.Color;
 pub const Transform2D = abi.Transform2D;
