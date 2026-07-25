@@ -45,13 +45,13 @@ for macOS, Linux, and Windows on x86_64 and ARM64.
 
 gzscript resolves the compiler from **Project Settings > Gzscript > Compiler > Zig Path**, then `GZSCRIPT_ZIG_PATH`, then the standard zvm path at `~/.zvm/bin/zig`, and finally `zig` on `PATH`. Set **Zig Path** to an absolute executable path when using another version manager or when Godot is launched from the macOS GUI.
 
-The addon compiles scripts on resource load and save. Its editor plugin also recompiles loaded Zig scripts after filesystem changes and immediately before Run. A failed build blocks Run and leaves the `.zig` resource attached.
+The addon compiles scripts synchronously on initial resource load. Saves and editor filesystem changes launch a serialized asynchronous Zig process so the editor remains responsive. Repeated saves are coalesced and stale results are discarded. Run waits for pending work and performs a final synchronous check; a failed build blocks Run and leaves the `.zig` resource attached.
 
 Generated adapters and libraries are stored below `.godot/gzscript` and can be deleted safely.
 
 Runtime modules default to Zig's `Debug` optimization mode. Change **Project
 Settings > Gzscript > Compiler > Optimization** to `ReleaseSafe`,
-`ReleaseFast`, or `ReleaseSmall` when testing exported-project performance. The
+`ReleaseFast`, or `ReleaseSmall` when measuring runtime performance. The
 optimization mode is part of the module cache identity.
 
 The cache identity includes the script path and source, every `.zig` file below
@@ -114,7 +114,7 @@ try self.base.emitSignal("started", .{});
 try self.base.emitSignal("position_changed", .{position});
 ```
 
-Generated wrappers cover the reviewed `Node`, `CanvasItem`, `Control`, `Node2D`, `Sprite2D`, and `Node3D` APIs supported by ABI v3, including transforms, drawing, colors, rectangles, visibility, hierarchy, and object-returning methods. Use `gd.Object.call` as the fallback for methods outside that generated surface. Dynamic calls report missing methods and invalid arguments as Zig errors. Export additions and removals refresh the selected node's Inspector after a successful save.
+Generated wrappers cover the reviewed `Node`, `CanvasItem`, `Control`, `Node2D`, `Sprite2D`, and `Node3D` APIs supported by ABI v4, including transforms, drawing, colors, rectangles, visibility, hierarchy, and object-returning methods. Object exports retain `RefCounted` values and reject incompatible Godot classes. Use `gd.Object.call` as the fallback for methods outside that generated surface. Dynamic calls report missing methods and invalid arguments as Zig errors. Export additions and removals refresh the selected node's Inspector after a successful save.
 
 The typed wrappers are generated from the pinned Godot API metadata and checked into the addon:
 
@@ -149,12 +149,14 @@ editor metadata. Existing instances keep the exact module and Zig-owned state
 with which they were created. A failed reload does not replace that module, so
 existing instances remain safe, but the script is marked invalid and cannot
 create new instances until a later successful reload. `keep_state` does not
-currently migrate private or exported state between module versions.
+currently migrate private or exported state between module versions. While an
+asynchronous save is pending, the last accepted module remains active.
 
 ## MVP limitations
 
-- Mobile and Web exports are not implemented.
+- Packaged project exports are not implemented yet; development currently requires loose source files and a local Zig compiler.
+- Threaded `ResourceLoader` requests for Zig scripts are rejected; initial loads must run on the main thread.
 - Active instances are not migrated after recompilation; see the reload contract above.
 - Zig callbacks map `ready`, `enterTree`, `exitTree`, `process`, `physicsProcess`, `input`, `unhandledInput`, `shortcutInput`, `unhandledKeyInput`, `guiInput`, and `draw` to their Godot virtual methods. An optional `notification` method receives other Godot notifications by number.
-- Generated typed methods are limited to the ABI v3 scalar, object ID, string-input, vector, color, transform, rectangle, and enum type matrix.
+- Generated typed methods are limited to the ABI v4 scalar, typed object ID, string-input, vector, color, transform, rectangle, and enum type matrix.
 - Arrays, dictionaries, packed arrays, `Callable`, and general `Variant` values are not yet supported by the typed ABI.
