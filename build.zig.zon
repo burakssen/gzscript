@@ -1,6 +1,6 @@
 .{
     .name = .gzscript,
-    .version = "0.0.1",
+    .version = "0.1.0",
     .dependencies = .{
         .godot_cpp = .{
             .url = "git+https://github.com/godotengine/godot-cpp.git#ba0edfed90512ec64aba51d4295a3e7e30112f86",

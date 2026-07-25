@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define GZSCRIPT_ABI_VERSION 2u
+#define GZSCRIPT_ABI_VERSION 3u
 
 typedef struct {
   const char *ptr;
@@ -34,6 +34,11 @@ typedef enum {
   GZ_VALUE_STRING = 4,
   GZ_VALUE_VECTOR2 = 5,
   GZ_VALUE_OBJECT = 6,
+  GZ_VALUE_VECTOR3 = 7,
+  GZ_VALUE_COLOR = 8,
+  GZ_VALUE_TRANSFORM2D = 9,
+  GZ_VALUE_TRANSFORM3D = 10,
+  GZ_VALUE_RECT2 = 11,
 } GzValueType;
 
 typedef struct {
@@ -41,12 +46,46 @@ typedef struct {
   float y;
 } GzVector2;
 
+typedef struct {
+  float x;
+  float y;
+  float z;
+} GzVector3;
+
+typedef struct {
+  float r;
+  float g;
+  float b;
+  float a;
+} GzColor;
+
+typedef struct {
+  GzVector2 x;
+  GzVector2 y;
+  GzVector2 origin;
+} GzTransform2D;
+
+typedef struct {
+  GzVector3 basis[3];
+  GzVector3 origin;
+} GzTransform3D;
+
+typedef struct {
+  GzVector2 position;
+  GzVector2 size;
+} GzRect2;
+
 typedef union {
   bool boolean;
   int64_t integer;
   double floating;
   GzStringView string;
   GzVector2 vector2;
+  GzVector3 vector3;
+  GzColor color;
+  GzTransform2D transform2d;
+  GzTransform3D transform3d;
+  GzRect2 rect2;
   uint64_t object_id;
 } GzValueData;
 
@@ -57,16 +96,31 @@ typedef struct {
 } GzValue;
 
 #ifdef __cplusplus
-static_assert(GZ_VALUE_NIL == 0 && GZ_VALUE_OBJECT == 6,
+static_assert(GZ_VALUE_NIL == 0 && GZ_VALUE_BOOL == 1 && GZ_VALUE_INT == 2 &&
+                  GZ_VALUE_FLOAT == 3 && GZ_VALUE_STRING == 4 &&
+                  GZ_VALUE_VECTOR2 == 5 && GZ_VALUE_OBJECT == 6 &&
+                  GZ_VALUE_VECTOR3 == 7 && GZ_VALUE_COLOR == 8 &&
+                  GZ_VALUE_TRANSFORM2D == 9 && GZ_VALUE_TRANSFORM3D == 10 &&
+                  GZ_VALUE_RECT2 == 11,
               "GzValueType ordinals are part of the ABI");
 static_assert(sizeof(void *) == 8, "gzscript supports 64-bit targets only");
 static_assert(sizeof(GzStringView) == 16 && alignof(GzStringView) == 8,
               "Unexpected GzStringView ABI layout");
 static_assert(sizeof(GzVector2) == 8 && alignof(GzVector2) == 4,
               "Unexpected GzVector2 ABI layout");
-static_assert(sizeof(GzValueData) == 16 && alignof(GzValueData) == 8,
+static_assert(sizeof(GzVector3) == 12 && alignof(GzVector3) == 4,
+              "Unexpected GzVector3 ABI layout");
+static_assert(sizeof(GzColor) == 16 && alignof(GzColor) == 4,
+              "Unexpected GzColor ABI layout");
+static_assert(sizeof(GzTransform2D) == 24 && alignof(GzTransform2D) == 4,
+              "Unexpected GzTransform2D ABI layout");
+static_assert(sizeof(GzTransform3D) == 48 && alignof(GzTransform3D) == 4,
+              "Unexpected GzTransform3D ABI layout");
+static_assert(sizeof(GzRect2) == 16 && alignof(GzRect2) == 4,
+              "Unexpected GzRect2 ABI layout");
+static_assert(sizeof(GzValueData) == 48 && alignof(GzValueData) == 8,
               "Unexpected GzValueData ABI layout");
-static_assert(sizeof(GzValue) == 24 && alignof(GzValue) == 8 &&
+static_assert(sizeof(GzValue) == 56 && alignof(GzValue) == 8 &&
                   offsetof(GzValue, data) == 8,
               "Unexpected GzValue ABI layout");
 #endif
@@ -75,6 +129,9 @@ static_assert(sizeof(GzValue) == 24 && alignof(GzValue) == 8 &&
 typedef enum {
   GZ_PROPERTY_HINT_NONE = 0,
   GZ_PROPERTY_HINT_RANGE = 1,
+  GZ_PROPERTY_HINT_ENUM = 2,
+  GZ_PROPERTY_HINT_FILE = 13,
+  GZ_PROPERTY_HINT_MULTILINE_TEXT = 18,
 } GzPropertyHint;
 
 typedef struct {
@@ -87,6 +144,7 @@ typedef struct {
   GzStringView name;
   uint32_t type;
   uint32_t hint;
+  GzStringView hint_string;
   GzStringView category;
   double range_min;
   double range_max;
@@ -157,6 +215,14 @@ typedef struct {
   GzSetProperty set_property;
   GzNotification notification;
 } GzScriptDescriptor;
+
+#ifdef __cplusplus
+static_assert(sizeof(GzScriptDescriptor) == 120 &&
+                  alignof(GzScriptDescriptor) == 8 &&
+                  offsetof(GzScriptDescriptor, base_class) == 8 &&
+                  offsetof(GzScriptDescriptor, create_instance) == 72,
+              "Unexpected GzScriptDescriptor ABI layout");
+#endif
 
 typedef GzStatus (*GzScriptInit)(const GzEngineApi *engine_api,
                                  const GzScriptDescriptor **descriptor);

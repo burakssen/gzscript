@@ -5,6 +5,7 @@ classes/control.zig
 classes/font.zig
 classes/input_event.zig
 classes/material.zig
+classes/mesh.zig
 classes/multi_mesh.zig
 classes/multiplayer_api.zig
 classes/node.zig
@@ -14,6 +15,7 @@ classes/node_3d_gizmo.zig
 classes/scene_tree.zig
 classes/sprite_2d.zig
 classes/style_box.zig
+classes/text_server.zig
 classes/texture_2d.zig
 classes/theme.zig
 classes/tween.zig

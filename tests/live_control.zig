@@ -7,6 +7,7 @@ base: Base,
 
 pub const signals = .{
     .verified = gd.signal(.{ .parent = gd.Node, .self_node = gd.Node }),
+    .color_verified = gd.signal(.{ .color = gd.Color }),
 };
 
 pub fn init(ctx: gd.InitContext) !Self {
@@ -25,6 +26,11 @@ pub fn ready(self: *Self) !void {
     try self.base.setLayoutDirection(.ltr);
     if (try self.base.getLayoutDirection() != .ltr) return error.LayoutDirectionMismatch;
 
+    const expected_color = gd.Color{ .r = 0.2, .g = 0.4, .b = 0.6, .a = 1.0 };
+    try self.base.addThemeColorOverride("font_color", expected_color);
+    const actual_color = try self.base.getThemeColor("font_color", "");
+    if (actual_color.r != expected_color.r or actual_color.g != expected_color.g or actual_color.b != expected_color.b or actual_color.a != expected_color.a) return error.ThemeColorMismatch;
+
     try canvas.setVisible(false);
     if (try canvas.isVisible()) return error.ControlDidNotHide;
     try canvas.setVisible(true);
@@ -36,4 +42,5 @@ pub fn ready(self: *Self) !void {
     if ((try node.getOwner()) != null) return error.UnexpectedSceneOwner;
 
     try self.base.emitSignal("verified", .{ parent_node, node });
+    try self.base.emitSignal("color_verified", .{expected_color});
 }

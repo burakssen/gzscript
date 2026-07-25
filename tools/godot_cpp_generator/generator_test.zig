@@ -21,7 +21,7 @@ test "snapshot restores the complete generated tree" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
 
-    // ponytail: the snapshot is immutable because Godot, precision, and pointer width are pinned.
+    // the snapshot is immutable because Godot, precision, and pointer width are pinned.
     try generator.extractSnapshot(std.testing.io, temporary.dir, "out");
     try std.testing.expect((try temporary.dir.statFile(std.testing.io, "out/gen/include/godot_cpp/classes/object.hpp", .{})).kind == .file);
     try std.testing.expect((try temporary.dir.statFile(std.testing.io, "out/gen/include/godot_cpp/variant/string.hpp", .{})).kind == .file);

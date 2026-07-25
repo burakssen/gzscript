@@ -15,18 +15,19 @@ class GzScript : public godot::ScriptExtension {
   std::shared_ptr<GzCompiledModule> module;
   bool valid = false;
   mutable std::unordered_set<void *> placeholders;
+  mutable std::unordered_set<void *> instances;
   static std::unordered_set<GzScript *> scripts;
 
 protected:
   static void _bind_methods();
 
 public:
-  mutable std::unordered_set<void *> instances;
   GzScript();
   ~GzScript();
   static const std::unordered_set<GzScript *> &get_scripts() { return scripts; }
   void set_source(const godot::String &code) { source = code; }
   const std::shared_ptr<GzCompiledModule> &get_module() const { return module; }
+  void remove_instance(void *instance) const { instances.erase(instance); }
 
   bool _editor_can_reload_from_file() override;
   bool _can_instantiate() const override;

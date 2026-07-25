@@ -35,7 +35,7 @@ const TestScript = struct {
 
     pub const signals = .{
         .started = gd.signal(.{}),
-        .position_changed = gd.signal(.{ .position = gd.Vector2(f64) }),
+        .position_changed = gd.signal(.{ .position = gd.Vector(2, f64) }),
     };
 
     pub fn init(ctx: gd.InitContext) !Self {
@@ -139,17 +139,32 @@ test "2D wrappers expose typed position methods" {
     try std.testing.expect(@hasDecl(gd.Sprite2D, "getPosition"));
 }
 
-test "ABI v2 layouts remain stable" {
-    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.StringView));
-    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.Vector2(f64)));
-    try std.testing.expectEqual(@as(usize, 8), @sizeOf(gd.abi.Vector2(f32)));
+test "ABI v3 layouts remain stable" {
+    try std.testing.expectEqual(@as(u32, 0), @intFromEnum(gd.abi.ValueType.nil));
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(gd.abi.ValueType.boolean));
+    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(gd.abi.ValueType.integer));
+    try std.testing.expectEqual(@as(u32, 3), @intFromEnum(gd.abi.ValueType.floating));
+    try std.testing.expectEqual(@as(u32, 4), @intFromEnum(gd.abi.ValueType.string));
+    try std.testing.expectEqual(@as(u32, 5), @intFromEnum(gd.abi.ValueType.vector2));
+    try std.testing.expectEqual(@as(u32, 6), @intFromEnum(gd.abi.ValueType.object));
+    try std.testing.expectEqual(@as(u32, 7), @intFromEnum(gd.abi.ValueType.vector3));
+    try std.testing.expectEqual(@as(u32, 8), @intFromEnum(gd.abi.ValueType.color));
+    try std.testing.expectEqual(@as(u32, 9), @intFromEnum(gd.abi.ValueType.transform2d));
+    try std.testing.expectEqual(@as(u32, 10), @intFromEnum(gd.abi.ValueType.transform3d));
+    try std.testing.expectEqual(@as(u32, 11), @intFromEnum(gd.abi.ValueType.rect2));
 
-    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.ValueData));
-    try std.testing.expectEqual(@as(usize, 24), @sizeOf(gd.abi.Value));
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.StringView));
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(gd.abi.Vector(2, f64)));
+    try std.testing.expectEqual(@as(usize, 8), @sizeOf(gd.abi.Vector(2, f32)));
+
+    try std.testing.expectEqual(@as(usize, 48), @sizeOf(gd.abi.ValueData));
+    try std.testing.expectEqual(@as(usize, 56), @sizeOf(gd.abi.Value));
     try std.testing.expectEqual(@as(usize, 56), @sizeOf(gd.abi.EngineApi));
+    try std.testing.expectEqual(@as(usize, 120), @sizeOf(gd.abi.ScriptDescriptor));
 
     try std.testing.expectEqual(@as(usize, 8), @alignOf(gd.abi.Value));
     try std.testing.expectEqual(@as(usize, 8), @offsetOf(gd.abi.Value, "data"));
+    try std.testing.expectEqual(@as(usize, 72), @offsetOf(gd.abi.ScriptDescriptor, "create_instance"));
 }
 
 test "shared codec supports objects and nullable objects" {
@@ -174,16 +189,16 @@ test "shared codec supports objects and nullable objects" {
     try std.testing.expectEqual(@as(?TestObject, null), decoded_nil);
 }
 
-test "shared codec round-trips ABI v2 value types" {
-    const vector = gd.codec.toValue(gd.Vector2(f64){ 3.0, 4.0 });
+test "shared codec round-trips ABI v3 value types" {
+    const vector = gd.codec.toValue(gd.Vector(2, f64){ 3.0, 4.0 });
     try std.testing.expectEqual(gd.abi.ValueType.vector2, vector.type);
-    const decoded_vector = try gd.codec.fromValue(gd.Vector2(f64), &vector);
+    const decoded_vector = try gd.codec.fromValue(gd.Vector(2, f64), &vector);
     try std.testing.expectEqual(@as(f64, 3.0), decoded_vector[0]);
     try std.testing.expectEqual(@as(f64, 4.0), decoded_vector[1]);
 
-    const vector_f32 = gd.codec.toValue(gd.Vector2(f32){ 3.0, 4.0 });
+    const vector_f32 = gd.codec.toValue(gd.Vector(2, f32){ 3.0, 4.0 });
     try std.testing.expectEqual(gd.abi.ValueType.vector2, vector_f32.type);
-    const decoded_f32 = try gd.codec.fromValue(gd.Vector2(f32), &vector_f32);
+    const decoded_f32 = try gd.codec.fromValue(gd.Vector(2, f32), &vector_f32);
     try std.testing.expectEqual(@as(f32, 3.0), decoded_f32[0]);
     try std.testing.expectEqual(@as(f32, 4.0), decoded_f32[1]);
 
@@ -269,10 +284,10 @@ test "Node2D wrappers expose supported Godot 4.7 methods" {
         try std.testing.expect(@hasDecl(gd.Node2D, method));
         try std.testing.expect(@hasDecl(gd.Sprite2D, method));
     }
-    try std.testing.expect(!@hasDecl(gd.Node2D, "setTransform"));
+    try std.testing.expect(@hasDecl(gd.Node2D, "setTransform"));
 }
 
-test "scene and UI wrappers expose selected ABI v2 methods" {
+test "scene and UI wrappers expose selected ABI v3 methods" {
     inline for (.{ gd.Node, gd.CanvasItem, gd.Control, gd.Node2D, gd.Sprite2D, gd.Node3D }) |Class| {
         try std.testing.expect(@hasDecl(Class, "getParent"));
         try std.testing.expect(@hasDecl(Class, "isInsideTree"));
@@ -287,7 +302,7 @@ test "scene and UI wrappers expose selected ABI v2 methods" {
     try std.testing.expect(@hasDecl(gd.Sprite2D, "getTexture"));
     try std.testing.expect(@hasDecl(gd.Node3D, "setRotationOrder"));
     try std.testing.expect(@hasDecl(gd.Node3D, "rotateX"));
-    try std.testing.expect(!@hasDecl(gd.Node3D, "setPosition"));
+    try std.testing.expect(@hasDecl(gd.Node3D, "setPosition"));
     try std.testing.expect(!@hasDecl(gd.Texture2D, "setTexture"));
 }
 

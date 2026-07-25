@@ -10,17 +10,22 @@ pub const Range = struct {
 pub const Property = struct {
     category: []const u8 = "",
     range: ?Range = null,
+    hint: abi.PropertyHint = .none,
+    hint_string: []const u8 = "",
 };
 
 pub fn property(comptime options: anytype) Property {
     var result = Property{};
     if (@hasField(@TypeOf(options), "category")) result.category = options.category;
+    if (@hasField(@TypeOf(options), "hint")) result.hint = options.hint;
+    if (@hasField(@TypeOf(options), "hint_string")) result.hint_string = options.hint_string;
     if (@hasField(@TypeOf(options), "range")) {
         result.range = .{
             .min = options.range.min,
             .max = options.range.max,
             .step = if (@hasField(@TypeOf(options.range), "step")) options.range.step else 0.01,
         };
+        result.hint = .range;
     }
     return result;
 }

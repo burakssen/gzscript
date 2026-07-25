@@ -121,7 +121,7 @@ test "root policy selects eligible methods and derives signature dependencies" {
         \\      {"name":"set_side","hash":2,"arguments":[{"name":"side","type":"enum::Side"}]},
         \\      {"name":"set_mode","hash":3,"arguments":[{"name":"mode","type":"enum::Node.Mode"}]},
         \\      {"name":"get_child","return_value":{"type":"Child"}},
-        \\      {"name":"set_vector_3","arguments":[{"name":"value","type":"Vector3"}]},
+        \\      {"name":"set_vector_4","arguments":[{"name":"value","type":"Vector4"}]},
         \\      {"name":"virtual_method","is_virtual":true}
         \\    ]},
         \\    {"name":"Child"}
@@ -141,7 +141,7 @@ test "root policy selects eligible methods and derives signature dependencies" {
     try std.testing.expect(std.mem.indexOf(u8, index, "pub const Child = @import") != null);
     try std.testing.expect(std.mem.indexOf(u8, node, "pub fn setCount(self: @This(), count: i64)") != null);
     try std.testing.expect(std.mem.indexOf(u8, node, "pub fn getChild(self: @This()) !?Child") != null);
-    try std.testing.expect(std.mem.indexOf(u8, node, "setVector3") == null);
+    try std.testing.expect(std.mem.indexOf(u8, node, "setVector4") == null);
     try std.testing.expect(std.mem.indexOf(u8, node, "virtualMethod") == null);
 }
 

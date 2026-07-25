@@ -31,6 +31,7 @@ fn enumFromInteger(comptime T: type, value: i64) !T {
 pub fn isVector2Type(comptime T: type) bool {
     return switch (@typeInfo(T)) {
         .vector => |info| info.len == 2 and (info.child == f32 or info.child == f64),
+        .array => |info| info.len == 2 and (info.child == f32 or info.child == f64),
         .@"struct" => |info| (info.is_tuple and info.fields.len == 2) or (@hasField(T, "x") and @hasField(T, "y") and info.fields.len == 2),
         else => false,
     };
@@ -38,9 +39,7 @@ pub fn isVector2Type(comptime T: type) bool {
 
 pub inline fn vecX(val: anytype) f32 {
     const T = @TypeOf(val);
-    if (@typeInfo(T) == .vector) {
-        return @floatCast(val[0]);
-    } else if (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple) {
+    if (@typeInfo(T) == .vector or @typeInfo(T) == .array or (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple)) {
         return @floatCast(val[0]);
     } else {
         return @floatCast(val.x);
@@ -49,9 +48,7 @@ pub inline fn vecX(val: anytype) f32 {
 
 pub inline fn vecY(val: anytype) f32 {
     const T = @TypeOf(val);
-    if (@typeInfo(T) == .vector) {
-        return @floatCast(val[1]);
-    } else if (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple) {
+    if (@typeInfo(T) == .vector or @typeInfo(T) == .array or (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple)) {
         return @floatCast(val[1]);
     } else {
         return @floatCast(val.y);
@@ -59,13 +56,73 @@ pub inline fn vecY(val: anytype) f32 {
 }
 
 pub inline fn makeVec2(comptime T: type, x: f32, y: f32) T {
-    if (@typeInfo(T) == .vector) {
-        return T{ @floatCast(x), @floatCast(y) };
-    } else if (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple) {
+    if (@typeInfo(T) == .vector or @typeInfo(T) == .array or (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple)) {
         return T{ @floatCast(x), @floatCast(y) };
     } else {
         return T{ .x = @floatCast(x), .y = @floatCast(y) };
     }
+}
+
+pub fn isVector3Type(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .vector => |info| info.len == 3 and (info.child == f32 or info.child == f64),
+        .array => |info| info.len == 3 and (info.child == f32 or info.child == f64),
+        .@"struct" => |info| (info.is_tuple and info.fields.len == 3) or (@hasField(T, "x") and @hasField(T, "y") and @hasField(T, "z") and info.fields.len == 3),
+        else => false,
+    };
+}
+
+pub inline fn vec3X(val: anytype) f32 {
+    const T = @TypeOf(val);
+    if (@typeInfo(T) == .vector or @typeInfo(T) == .array or (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple)) {
+        return @floatCast(val[0]);
+    } else {
+        return @floatCast(val.x);
+    }
+}
+
+pub inline fn vec3Y(val: anytype) f32 {
+    const T = @TypeOf(val);
+    if (@typeInfo(T) == .vector or @typeInfo(T) == .array or (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple)) {
+        return @floatCast(val[1]);
+    } else {
+        return @floatCast(val.y);
+    }
+}
+
+pub inline fn vec3Z(val: anytype) f32 {
+    const T = @TypeOf(val);
+    if (@typeInfo(T) == .vector or @typeInfo(T) == .array or (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple)) {
+        return @floatCast(val[2]);
+    } else {
+        return @floatCast(val.z);
+    }
+}
+
+pub inline fn makeVec3(comptime T: type, x: f32, y: f32, z: f32) T {
+    if (@typeInfo(T) == .vector or @typeInfo(T) == .array or (@typeInfo(T) == .@"struct" and @typeInfo(T).@"struct".is_tuple)) {
+        return T{ @floatCast(x), @floatCast(y), @floatCast(z) };
+    } else if (@typeInfo(T) == .@"struct") {
+        return T{ .x = @floatCast(x), .y = @floatCast(y), .z = @floatCast(z) };
+    } else {
+        unreachable;
+    }
+}
+
+pub fn isColorType(comptime T: type) bool {
+    return T == abi.Color;
+}
+
+pub fn isTransform2DType(comptime T: type) bool {
+    return T == abi.Transform2D;
+}
+
+pub fn isTransform3DType(comptime T: type) bool {
+    return T == abi.Transform3D;
+}
+
+pub fn isRect2Type(comptime T: type) bool {
+    return T == abi.Rect2;
 }
 
 pub fn valueType(comptime T: type) abi.ValueType {
@@ -85,6 +142,16 @@ pub fn valueType(comptime T: type) abi.ValueType {
         .string
     else if (comptime isVector2Type(T))
         .vector2
+    else if (comptime isVector3Type(T))
+        .vector3
+    else if (comptime isColorType(T))
+        .color
+    else if (comptime isTransform2DType(T))
+        .transform2d
+    else if (comptime isTransform3DType(T))
+        .transform3d
+    else if (comptime isRect2Type(T))
+        .rect2
     else
         @compileError("unsupported ABI value type: " ++ @typeName(T));
 }
@@ -107,12 +174,23 @@ pub fn toValue(value: anytype) abi.Value {
         .{ .type = .string, .data = .{ .string = .from(value) } }
     else if (comptime isVector2Type(T))
         .{ .type = .vector2, .data = .{ .vector2 = .{ vecX(value), vecY(value) } } }
+    else if (comptime isVector3Type(T))
+        .{ .type = .vector3, .data = .{ .vector3 = .{ vec3X(value), vec3Y(value), vec3Z(value) } } }
+    else if (comptime isColorType(T))
+        .{ .type = .color, .data = .{ .color = value } }
+    else if (comptime isTransform2DType(T))
+        .{ .type = .transform2d, .data = .{ .transform2d = value } }
+    else if (comptime isTransform3DType(T))
+        .{ .type = .transform3d, .data = .{ .transform3d = value } }
+    else if (comptime isRect2Type(T))
+        .{ .type = .rect2, .data = .{ .rect2 = value } }
     else
         @compileError("unsupported ABI value type: " ++ @typeName(T));
 }
 
 pub fn fromValue(comptime T: type, value: *const abi.Value) !T {
-    if (optionalChild(T)) |Child| {
+    if (comptime optionalChild(T) != null) {
+        const Child = comptime optionalChild(T).?;
         if (comptime !isObjectType(Child)) @compileError("only Godot object wrappers may be optional ABI values");
         if (value.type == .nil or (value.type == .object and value.data.object_id == 0)) return null;
         return try fromValue(Child, value);
@@ -130,6 +208,16 @@ pub fn fromValue(comptime T: type, value: *const abi.Value) !T {
         value.data.string.slice()
     else if (comptime isVector2Type(T))
         makeVec2(T, value.data.vector2[0], value.data.vector2[1])
+    else if (comptime isVector3Type(T))
+        makeVec3(T, value.data.vector3[0], value.data.vector3[1], value.data.vector3[2])
+    else if (comptime isColorType(T))
+        value.data.color
+    else if (comptime isTransform2DType(T))
+        value.data.transform2d
+    else if (comptime isTransform3DType(T))
+        value.data.transform3d
+    else if (comptime isRect2Type(T))
+        value.data.rect2
     else
         unreachable;
 }

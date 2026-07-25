@@ -6,6 +6,7 @@ var control_probe: Control
 var sprite_probe: Sprite2D
 var node_3d_probe: Node3D
 var verified := {}
+var color_verified := false
 
 
 func _initialize() -> void:
@@ -32,6 +33,10 @@ func _on_verified(kind: String, parent: Node, self_node: Node) -> void:
 
 func _on_control_verified(parent: Node, self_node: Node) -> void:
 	_on_verified("control", parent, self_node)
+
+
+func _on_color_verified(color: Color) -> void:
+	color_verified = color.is_equal_approx(Color(0.2, 0.4, 0.6, 1.0))
 
 
 func _on_sprite_verified(parent: Node, self_node: Node) -> void:
@@ -62,6 +67,7 @@ func _run() -> void:
 	control_probe = Control.new()
 	control_probe.set_script(control_script)
 	control_probe.connect(&"verified", _on_control_verified)
+	control_probe.connect(&"color_verified", _on_color_verified)
 	sprite_probe = Sprite2D.new()
 	sprite_probe.set_script(sprite_script)
 	sprite_probe.connect(&"verified", _on_sprite_verified)
@@ -80,6 +86,8 @@ func _run() -> void:
 
 	if not _check(verified.get("control", false), "Control bindings probe failed"):
 		return
+	if not _check(color_verified, "Color dynamic-call or signal conversion failed"):
+		return
 	if not _check(verified.get("sprite", false), "Sprite2D bindings probe failed"):
 		return
 	if not _check(verified.get("node3d", false), "Node3D bindings probe failed"):
@@ -89,6 +97,31 @@ func _run() -> void:
 	if not _check(sprite_probe.position.is_equal_approx(Vector2(21.0, 34.0)), "Sprite2D position mismatch"):
 		return
 	if not _check(not sprite_probe.centered and sprite_probe.flip_h, "Sprite2D property mismatch"):
+		return
+
+	var sprite_props := sprite_script.get_script_property_list()
+	var enum_prop := {}
+	var file_prop := {}
+	var text_prop := {}
+	for prop in sprite_props:
+		if prop.name == "some_enum":
+			enum_prop = prop
+		elif prop.name == "some_file":
+			file_prop = prop
+		elif prop.name == "some_text":
+			text_prop = prop
+
+	if not _check(enum_prop.size() > 0, "some_enum property not found"):
+		return
+	if not _check(enum_prop.hint == PROPERTY_HINT_ENUM and enum_prop.hint_string == "First,Second,Third", "some_enum hint mismatch"):
+		return
+	if not _check(file_prop.size() > 0, "some_file property not found"):
+		return
+	if not _check(file_prop.hint == PROPERTY_HINT_FILE and file_prop.hint_string == "*.zig", "some_file hint mismatch"):
+		return
+	if not _check(text_prop.size() > 0, "some_text property not found"):
+		return
+	if not _check(text_prop.hint == PROPERTY_HINT_MULTILINE_TEXT, "some_text hint mismatch"):
 		return
 
 	fixture_2d.free()

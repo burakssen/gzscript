@@ -118,6 +118,7 @@ pub fn ScriptAdapter(comptime Script: type) type {
         const Box = struct {
             arena: std.heap.ArenaAllocator,
             script: Script,
+            owned_strings: [export_count]?[]u8,
         };
 
         const methods: [method_count]abi.MethodDescriptor = buildMethods();
@@ -154,7 +155,8 @@ pub fn ScriptAdapter(comptime Script: type) type {
                 result[index] = .{
                     .name = .from(export_field.name),
                     .type = properties.valueType(field.type),
-                    .hint = if (options.range != null) .range else .none,
+                    .hint = options.hint,
+                    .hint_string = .from(options.hint_string),
                     .category = .from(options.category),
                     .range_min = if (options.range) |range| range.min else 0,
                     .range_max = if (options.range) |range| range.max else 0,
@@ -202,6 +204,7 @@ pub fn ScriptAdapter(comptime Script: type) type {
         fn create(owner: u64, output: *?*anyopaque) callconv(.c) abi.Status {
             const box = std.heap.page_allocator.create(Box) catch return .out_of_memory;
             box.arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            for (&box.owned_strings) |*value| value.* = null;
             box.script = Script.init(.{ .owner = owner, .allocator = box.arena.allocator() }) catch {
                 box.arena.deinit();
                 std.heap.page_allocator.destroy(box);
@@ -215,6 +218,9 @@ pub fn ScriptAdapter(comptime Script: type) type {
             const raw = pointer orelse return;
             const box: *Box = @ptrCast(@alignCast(raw));
             if (@hasDecl(Script, "deinit")) box.script.deinit();
+            for (box.owned_strings) |value| {
+                if (value) |string| std.heap.page_allocator.free(string);
+            }
             box.arena.deinit();
             std.heap.page_allocator.destroy(box);
         }
@@ -254,17 +260,32 @@ pub fn ScriptAdapter(comptime Script: type) type {
                 if (property_index == index) {
                     const FieldType = @TypeOf(@field(box.script, field.name));
                     const converted = properties.fromValue(FieldType, value) orelse return .type_mismatch;
-                    @field(box.script, field.name) = if (FieldType == []const u8)
-                        box.arena.allocator().dupe(u8, converted) catch return .out_of_memory
-                    else
-                        converted;
+                    @field(box.script, field.name) = if (FieldType == []const u8) replace: {
+                        const replacement = std.heap.page_allocator.dupe(u8, converted) catch return .out_of_memory;
+                        if (box.owned_strings[index]) |previous| std.heap.page_allocator.free(previous);
+                        box.owned_strings[index] = replacement;
+                        break :replace replacement;
+                    } else converted;
                     return .ok;
                 }
             }
             return .property_not_found;
         }
 
-        fn notification(_: ?*anyopaque, _: i32, _: bool) callconv(.c) void {}
+        fn notification(pointer: ?*anyopaque, what: i32, reversed: bool) callconv(.c) void {
+            _ = reversed;
+            const raw = pointer orelse return;
+            const box: *Box = @ptrCast(@alignCast(raw));
+            // a compile-time declaration check avoids notification metadata.
+            if (@hasDecl(Script, "notification")) {
+                const result = box.script.notification(what);
+                if (@typeInfo(@TypeOf(result)) == .error_union) {
+                    _ = result catch |err| {
+                        runtime.log.err("gzscript: error in notification callback: {s}", .{@errorName(err)});
+                    };
+                }
+            }
+        }
 
         pub const descriptor = abi.ScriptDescriptor{
             .abi_version = abi.abi_version,

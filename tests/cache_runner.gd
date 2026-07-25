@@ -25,6 +25,12 @@ func _initialize() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(FIXTURE_DIR))
 	_write(HELPER_PATH, "pub const value: i64 = 1;\n")
 	_write(SCRIPT_PATH, SCRIPT_SOURCE)
+	var worker := Thread.new()
+	worker.start(_compile_on_worker)
+	if not _require(not worker.wait_to_finish(), "worker-thread compilation was not rejected"):
+		return
+	if not _require(GzBuildManager.get_last_diagnostics().contains("main thread"), "worker-thread rejection produced no actionable diagnostic"):
+		return
 
 	var before := _module_count()
 	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "initial fixture compile failed"):
@@ -55,10 +61,26 @@ func _initialize() -> void:
 		return
 
 	_write(SCRIPT_PATH, SCRIPT_SOURCE)
-	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "valid source did not recover after failure"):
+	script.set_source_code(SCRIPT_SOURCE)
+	if not _require(script.reload() == OK, "failed to reload recovered script"):
 		return
 	if not _require(GzBuildManager.get_last_diagnostics().is_empty(), "successful compile retained stale diagnostics"):
 		return
+
+	# Existing instances keep the module and state they were created with.
+	var instance := Node.new()
+	instance.set_script(script)
+	instance.set("value", 42)
+
+	var new_source := SCRIPT_SOURCE + "\n// modified to trigger recompile\n"
+	_write(SCRIPT_PATH, new_source)
+	script.set_source_code(new_source)
+
+	if not _require(script.reload(false) == OK, "reload with an active instance failed"):
+		return
+	if not _require(instance.get("value") == 42, "reload replaced an existing instance"):
+		return
+	instance.free()
 
 	_cleanup()
 	print("GZSCRIPT_CACHE_OK")
@@ -72,6 +94,10 @@ func _module_count() -> int:
 	var path := "res://.godot/gzscript/modules/%s-%s" % [platform, Engine.get_architecture_name()]
 	var directory := DirAccess.open(path)
 	return 0 if directory == null else directory.get_files().size()
+
+
+func _compile_on_worker() -> bool:
+	return GzBuildManager.compile_path(SCRIPT_PATH)
 
 
 func _write(path: String, contents: String) -> void:

@@ -1,4 +1,4 @@
-pub const abi_version: u32 = 2;
+pub const abi_version: u32 = 3;
 
 pub const StringView = extern struct {
     ptr: [*]const u8,
@@ -32,18 +32,52 @@ pub const ValueType = enum(u32) {
     string = 4,
     vector2 = 5,
     object = 6,
+    vector3 = 7,
+    color = 8,
+    transform2d = 9,
+    transform3d = 10,
+    rect2 = 11,
 };
 
-pub fn Vector2(comptime T: type) type {
-    return @Vector(2, T);
+pub fn Vector(comptime N: comptime_int, comptime T: type) type {
+    if (N != 2 and N != 3) @compileError("ABI vectors must have 2 or 3 elements");
+    return [N]T;
 }
+
+pub const Color = extern struct {
+    r: f32 = 0,
+    g: f32 = 0,
+    b: f32 = 0,
+    a: f32 = 1,
+};
+
+pub const Transform2D = extern struct {
+    x: Vector(2, f32) = .{ 1, 0 },
+    y: Vector(2, f32) = .{ 0, 1 },
+    origin: Vector(2, f32) = .{ 0, 0 },
+};
+
+pub const Transform3D = extern struct {
+    basis: [3]Vector(3, f32) = .{ .{ 1, 0, 0 }, .{ 0, 1, 0 }, .{ 0, 0, 1 } },
+    origin: Vector(3, f32) = .{ 0, 0, 0 },
+};
+
+pub const Rect2 = extern struct {
+    position: Vector(2, f32) = .{ 0, 0 },
+    size: Vector(2, f32) = .{ 0, 0 },
+};
 
 pub const ValueData = extern union {
     boolean: bool,
     integer: i64,
     floating: f64,
     string: StringView,
-    vector2: Vector2(f32),
+    vector2: Vector(2, f32),
+    vector3: Vector(3, f32),
+    color: Color,
+    transform2d: Transform2D,
+    transform3d: Transform3D,
+    rect2: Rect2,
     object_id: u64,
 };
 
@@ -53,7 +87,13 @@ pub const Value = extern struct {
     data: ValueData = .{ .integer = 0 },
 };
 
-pub const PropertyHint = enum(u32) { none = 0, range = 1 };
+pub const PropertyHint = enum(u32) {
+    none = 0,
+    range = 1,
+    @"enum" = 2,
+    file = 13,
+    multiline_text = 18,
+};
 
 pub const MethodDescriptor = extern struct {
     name: StringView,
@@ -65,6 +105,7 @@ pub const PropertyDescriptor = extern struct {
     name: StringView,
     type: ValueType,
     hint: PropertyHint,
+    hint_string: StringView,
     category: StringView,
     range_min: f64,
     range_max: f64,

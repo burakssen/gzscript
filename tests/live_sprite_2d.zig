@@ -5,16 +5,40 @@ pub const Base = gd.Sprite2D;
 const Self = @This();
 
 base: Base,
+some_enum: i64 = 0,
+some_file: []const u8 = "",
+some_text: []const u8 = "",
+enter_tree_notification_received: bool = false,
+
+pub const exports = .{
+    .some_enum = gd.property(.{ .hint = .@"enum", .hint_string = "First,Second,Third" }),
+    .some_file = gd.property(.{ .hint = .file, .hint_string = "*.zig" }),
+    .some_text = gd.property(.{ .hint = .multiline_text }),
+};
 
 pub const signals = .{
     .verified = gd.signal(.{ .parent = gd.Node, .self_node = gd.Node }),
 };
 
 pub fn init(ctx: gd.InitContext) !Self {
-    return .{ .base = .{ .owner = ctx.owner } };
+    return .{
+        .base = .{ .owner = ctx.owner },
+        .some_enum = 0,
+        .some_file = "",
+        .some_text = "",
+        .enter_tree_notification_received = false,
+    };
+}
+
+pub fn notification(self: *Self, what: i32) void {
+    if (what == 10) { // NOTIFICATION_ENTER_TREE = 10
+        self.enter_tree_notification_received = true;
+    }
 }
 
 pub fn ready(self: *Self) !void {
+    if (!self.enter_tree_notification_received) return error.NotificationNotReceived;
+
     const node2d = self.base.asNode2D();
     const canvas = self.base.asCanvasItem();
     const node = self.base.asNode();
@@ -23,6 +47,10 @@ pub fn ready(self: *Self) !void {
     try node2d.setPosition(.{ 21.0, 34.0 });
     const position = try node2d.getPosition();
     if (position[0] != 21.0 or position[1] != 34.0) return error.SpritePositionMismatch;
+
+    try canvas.setModulate(.{ .r = 0.5, .g = 0.25, .b = 0.75, .a = 1.0 });
+    const modulate = try canvas.getModulate();
+    if (modulate.r != 0.5 or modulate.g != 0.25 or modulate.b != 0.75 or modulate.a != 1.0) return error.ColorMismatch;
 
     try self.base.setCentered(false);
     try self.base.setFlipH(true);
@@ -37,6 +65,7 @@ pub fn ready(self: *Self) !void {
 
     const parent = (try node.getParent()) orelse return error.MissingParent;
     if ((try node.getOwner()) != null) return error.UnexpectedSceneOwner;
+
     try self.base.emitSignal("verified", .{ parent, node });
 }
 

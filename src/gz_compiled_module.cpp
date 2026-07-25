@@ -1,4 +1,5 @@
 #include "gz_compiled_module.hpp"
+#include "gz_value_codec.hpp"
 
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -16,78 +17,12 @@
 using namespace godot;
 
 namespace {
-String from_view(GzStringView value) {
-  return String::utf8(value.ptr, static_cast<int64_t>(value.len));
-}
-
-GzStringView to_view(const CharString &value) {
-  return {value.get_data(), static_cast<size_t>(value.length())};
-}
-
-Variant to_variant(const GzValue &value) {
-  switch (value.type) {
-  case GZ_VALUE_BOOL:
-    return value.data.boolean;
-  case GZ_VALUE_INT:
-    return value.data.integer;
-  case GZ_VALUE_FLOAT:
-    return value.data.floating;
-  case GZ_VALUE_STRING:
-    return from_view(value.data.string);
-  case GZ_VALUE_VECTOR2:
-    return Vector2(value.data.vector2.x, value.data.vector2.y);
-  case GZ_VALUE_OBJECT:
-    return ObjectDB::get_instance(value.data.object_id);
-  default:
-    return Variant();
-  }
-}
-
-GzValue from_variant(const Variant &value) {
-  static thread_local CharString string_storage;
-  GzValue result{};
-  switch (value.get_type()) {
-  case Variant::BOOL:
-    result.type = GZ_VALUE_BOOL;
-    result.data.boolean = value;
-    break;
-  case Variant::INT:
-    result.type = GZ_VALUE_INT;
-    result.data.integer = value;
-    break;
-  case Variant::FLOAT:
-    result.type = GZ_VALUE_FLOAT;
-    result.data.floating = value;
-    break;
-  case Variant::STRING:
-    string_storage = String(value).utf8();
-    result.type = GZ_VALUE_STRING;
-    result.data.string = to_view(string_storage);
-    break;
-  case Variant::VECTOR2: {
-    result.type = GZ_VALUE_VECTOR2;
-    Vector2 vector = value;
-    result.data.vector2 = {vector.x, vector.y};
-    break;
-  }
-  case Variant::OBJECT: {
-    result.type = GZ_VALUE_OBJECT;
-    Object *object = value;
-    result.data.object_id = object ? object->get_instance_id() : 0;
-    break;
-  }
-  default:
-    result.type = GZ_VALUE_NIL;
-  }
-  return result;
-}
-
 void log_info(GzStringView message) {
-  UtilityFunctions::print_rich(from_view(message));
+  UtilityFunctions::print_rich(gzscript::from_view(message));
 }
 
 void log_error(GzStringView message) {
-  UtilityFunctions::printerr(from_view(message));
+  UtilityFunctions::printerr(gzscript::from_view(message));
 }
 
 // Own keys because method names can originate in unloadable script modules.
@@ -100,7 +35,7 @@ StringName get_cached_name(GzStringView view) {
   if (it != method_name_cache.end()) {
     return it->second;
   }
-  StringName name(from_view(view));
+  StringName name(gzscript::from_view(view));
   method_name_cache.emplace(std::move(key), name);
   return name;
 }
@@ -113,8 +48,7 @@ GzStatus object_call(uint64_t object_id, GzStringView method,
     return GZ_STATUS_INVALID_ARGUMENT;
   }
 
-  // ponytail: stack-allocate argument buffers up to 8 parameters to eliminate
-  // heap allocation
+  // Keep common calls allocation-free.
   constexpr uint32_t STACK_LIMIT = 8;
   Variant stack_values[STACK_LIMIT];
   const Variant *stack_pointers[STACK_LIMIT];
@@ -133,7 +67,10 @@ GzStatus object_call(uint64_t object_id, GzStringView method,
   }
 
   for (uint32_t i = 0; i < argument_count; ++i) {
-    values_ptr[i] = to_variant(arguments[i]);
+    bool valid = false;
+    values_ptr[i] = gzscript::to_variant(arguments[i], &valid);
+    if (!valid)
+      return GZ_STATUS_TYPE_MISMATCH;
     pointers_ptr[i] = &values_ptr[i];
   }
 
@@ -145,7 +82,11 @@ GzStatus object_call(uint64_t object_id, GzStringView method,
                  static_cast<int>(argument_count), call_result, call_error);
   switch (call_error.error) {
   case GDEXTENSION_CALL_OK:
-    *result = from_variant(call_result);
+    static thread_local CharString string_storage;
+    bool valid;
+    *result = gzscript::from_variant(call_result, &string_storage, &valid);
+    if (!valid)
+      return GZ_STATUS_TYPE_MISMATCH;
     return GZ_STATUS_OK;
   case GDEXTENSION_CALL_ERROR_INVALID_METHOD:
     return GZ_STATUS_METHOD_NOT_FOUND;
@@ -166,21 +107,41 @@ GzStatus object_emit_signal(uint64_t object_id, GzStringView signal,
   if (!object || (argument_count > 0 && !arguments))
     return GZ_STATUS_INVALID_ARGUMENT;
 
-  Array args;
-  args.push_back(get_cached_name(signal));
-  for (uint32_t i = 0; i < argument_count; ++i)
-    args.push_back(to_variant(arguments[i]));
+  std::vector<Variant> values(argument_count + 1);
+  std::vector<const Variant *> pointers(argument_count + 1);
+  values[0] = get_cached_name(signal);
+  pointers[0] = &values[0];
+  for (uint32_t i = 0; i < argument_count; ++i) {
+    bool valid = false;
+    values[i + 1] = gzscript::to_variant(arguments[i], &valid);
+    if (!valid)
+      return GZ_STATUS_TYPE_MISMATCH;
+    pointers[i + 1] = &values[i + 1];
+  }
 
-  Variant result = object->callv("emit_signal", args);
-  return static_cast<Error>(static_cast<int64_t>(result)) == OK
+  static GDExtensionMethodBindPtr method_bind =
+      gdextension_interface::classdb_get_method_bind(
+          Object::get_class_static()._native_ptr(),
+          StringName("emit_signal")._native_ptr(), 4047867050);
+  if (!method_bind)
+    return GZ_STATUS_METHOD_NOT_FOUND;
+
+  Variant result;
+  GDExtensionCallError error{};
+  gdextension_interface::object_method_bind_call(
+      method_bind, object->_owner,
+      reinterpret_cast<GDExtensionConstVariantPtr *>(pointers.data()),
+      pointers.size(), &result, &error);
+  return error.error == GDEXTENSION_CALL_OK &&
+                 static_cast<Error>(static_cast<int64_t>(result)) == OK
              ? GZ_STATUS_OK
              : GZ_STATUS_SCRIPT_ERROR;
 }
 
 void *get_method_bind(GzStringView class_name, GzStringView method_name,
                       int64_t hash) {
-  StringName c_name(from_view(class_name));
-  StringName m_name(from_view(method_name));
+  StringName c_name(gzscript::from_view(class_name));
+  StringName m_name(gzscript::from_view(method_name));
   return (void *)::godot::gdextension_interface::classdb_get_method_bind(
       c_name._native_ptr(), m_name._native_ptr(), hash);
 }
@@ -269,17 +230,26 @@ std::shared_ptr<GzCompiledModule> GzCompiledModule::load(const String &p_path,
     close_library(handle);
     return {};
   }
+  if (!descriptor->create_instance || !descriptor->destroy_instance ||
+      !descriptor->call_method || !descriptor->get_property ||
+      !descriptor->set_property || !descriptor->notification ||
+      (descriptor->method_count > 0 && !descriptor->methods) ||
+      (descriptor->property_count > 0 && !descriptor->properties) ||
+      (descriptor->signal_count > 0 && !descriptor->signals)) {
+    error = "Compiled Zig script descriptor is incomplete";
+    close_library(handle);
+    return {};
+  }
 
   auto module = std::make_shared<GzCompiledModule>();
   module->handle = handle;
   module->descriptor = descriptor;
   module->path = p_path;
 
-  // ponytail: pre-cache StringName for all properties to speed up instance_set
-  // and instance_get
+  // Cache property names used by every instance get/set.
   for (uint32_t i = 0; i < descriptor->property_count; ++i) {
     module->property_names.push_back(
-        StringName(from_view(descriptor->properties[i].name)));
+        StringName(gzscript::from_view(descriptor->properties[i].name)));
   }
 
   return module;
