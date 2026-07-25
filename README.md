@@ -8,7 +8,7 @@ The current MVP targets macOS, Linux, and Windows on x86_64 and ARM64.
 
 ## Requirements
 
-- Godot 4.7 stable
+- Godot 4.7 stable, single-precision build
 - Zig 0.16.0 installed locally
 - macOS, Linux, or Windows on x86_64 or ARM64
 
@@ -90,31 +90,31 @@ pub fn init(ctx: gd.InitContext) !Self {
     return .{ .base = .{ .owner = ctx.owner } };
 }
 
-pub fn _ready(self: *Self) !void {
+pub fn ready(self: *Self) !void {
     try self.base.setPosition(.{ .x = 12.0, .y = 34.0 });
     gd.log.info("ready", .{});
 }
 
-pub fn _process(self: *Self, delta: f64) !void {
+pub fn process(self: *Self, delta: f64) !void {
     self.time_passed += delta;
 }
 ```
 
-Only fields listed in `exports` are visible to Godot. Exported fields must have defaults. The MVP supports `bool`, integer types, `f32`, `f64`, `[]const u8`, and `gd.Vector2(T)` descriptor types. Script templates are generated for the selected Godot base class.
+Only fields listed in `exports` are visible to Godot. Exported fields must have defaults. The MVP supports `bool`, integer types, `f32`, `f64`, `[]const u8`, `gd.Vector(2, T)`, `gd.Vector(3, T)`, `gd.Color`, `gd.Transform2D`, `gd.Transform3D`, `gd.Rect2`, enums, and Godot object wrappers. Script templates are generated for the selected Godot base class.
 
 Signals use named, typed arguments and are emitted through the base object:
 
 ```zig
 pub const signals = .{
     .started = gd.signal(.{}),
-    .position_changed = gd.signal(.{ .position = gd.Vector2(f64) }),
+    .position_changed = gd.signal(.{ .position = gd.Vector(2, f64) }),
 };
 
 try self.base.emitSignal("started", .{});
 try self.base.emitSignal("position_changed", .{position});
 ```
 
-`gd.Node2D` and `gd.Sprite2D` provide typed wrappers for the Godot 4.7 position, rotation, skew, scale, translation, look-at, and local/global point methods supported by ABI v2. Use `gd.Object.call` as the fallback for Godot methods that do not have typed wrappers yet. Dynamic calls report missing methods and invalid arguments as Zig errors. Export additions and removals refresh the selected node's Inspector after a successful save.
+Generated wrappers cover the reviewed `Node`, `CanvasItem`, `Control`, `Node2D`, `Sprite2D`, and `Node3D` APIs supported by ABI v3, including transforms, drawing, colors, rectangles, visibility, hierarchy, and object-returning methods. Use `gd.Object.call` as the fallback for methods outside that generated surface. Dynamic calls report missing methods and invalid arguments as Zig errors. Export additions and removals refresh the selected node's Inspector after a successful save.
 
 The typed wrappers are generated from the pinned Godot API metadata and checked into the addon:
 
@@ -123,7 +123,7 @@ zig build update-bindings
 zig build check-bindings
 ```
 
-`tools/bindings_profile.json` contains the reviewed root classes. The host Zig generator reads the pinned `extension_api.json`, emits every instance method supported by the current scalar, object, string-input, and `Vector2` type matrix, and derives required enums and dependency-only class wrappers from those signatures. Generated classes live in compact modules under `addons/gzscript/zig/generated_classes`; mutually dependent types are grouped into deterministic cycle modules. `class.zig` remains the stable compatibility facade, and CI validates the complete generated manifest and file contents.
+`tools/bindings_profile.json` contains the reviewed root classes. The host Zig generator reads the pinned `extension_api.json`, emits every instance method supported by the current ABI type matrix, and derives required enums and dependency-only class wrappers from those signatures. Generated classes live in compact modules under `addons/gzscript/zig/generated_classes`; mutually dependent types are grouped into deterministic cycle modules. `class.zig` remains the stable compatibility facade, and CI validates the complete generated manifest and file contents.
 
 ## Tests
 
@@ -155,6 +155,6 @@ currently migrate private or exported state between module versions.
 
 - Mobile and Web exports are not implemented.
 - Active instances are not migrated after recompilation; see the reload contract above.
-- Script callbacks currently cover `_ready`, `_process`, and `_physics_process`.
-- Generated typed methods are currently limited to the ABI v2 scalar, object ID, string-input, and `Vector2` type matrix.
-- `Vector3`, transforms, colors, rectangles, arrays, dictionaries, packed arrays, `Callable`, and general `Variant` values are not yet supported by the typed ABI.
+- Zig callbacks map `ready`, `enterTree`, `exitTree`, `process`, `physicsProcess`, `input`, `unhandledInput`, `shortcutInput`, `unhandledKeyInput`, `guiInput`, and `draw` to their Godot virtual methods. An optional `notification` method receives other Godot notifications by number.
+- Generated typed methods are limited to the ABI v3 scalar, object ID, string-input, vector, color, transform, rectangle, and enum type matrix.
+- Arrays, dictionaries, packed arrays, `Callable`, and general `Variant` values are not yet supported by the typed ABI.

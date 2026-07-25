@@ -20,7 +20,7 @@ pub const exports = .{
 
 pub const signals = .{
     .zig_ready = gd.signal(.{}),
-    .position_changed = gd.signal(.{ .position = gd.Vector2(f64) }),
+    .position_changed = gd.signal(.{ .position = gd.Vector(2, f64) }),
 };
 
 pub fn init(ctx: gd.InitContext) !Self {

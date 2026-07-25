@@ -25,7 +25,7 @@ Scripts declare signals with named compile-time arguments:
 ```zig
 pub const signals = .{
     .movement_started = gd.signal(.{}),
-    .position_changed = gd.signal(.{ .position = gd.Vector2(f64) }),
+    .position_changed = gd.signal(.{ .position = gd.Vector(2, f64) }),
 };
 ```
 
