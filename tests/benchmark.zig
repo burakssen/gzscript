@@ -6,9 +6,13 @@ const Self = @This();
 
 base: Base,
 mode: i64 = 0,
+result: f64 = 0.0,
+elapsed_usec: i64 = 0,
 
 pub const exports = .{
     .mode = gd.property(.{}),
+    .result = gd.property(.{}),
+    .elapsed_usec = gd.property(.{}),
 };
 
 pub fn init(ctx: gd.InitContext) !Self {
@@ -21,6 +25,7 @@ pub fn ready(self: *Self) !void {
 
 pub fn process(self: *Self, delta: f64) !void {
     _ = delta;
+    const started = gd.getTicksUsec();
     if (self.mode == 1) {
         // 1. Particle Physics Benchmark (500 boids x 20 steps = 5,000,000 interactions)
         const particle_count: usize = 500;
@@ -69,7 +74,7 @@ pub fn process(self: *Self, delta: f64) !void {
         }
 
         if (total_dist == 0.0) return error.SimulationError;
-        self.mode = 0;
+        self.result = total_dist;
     } else if (self.mode == 2) {
         // 2. Sorting Benchmark (Quicksort 10,000 elements)
         const size: usize = 10000;
@@ -83,7 +88,7 @@ pub fn process(self: *Self, delta: f64) !void {
         quicksort(&arr, 0, @intCast(size - 1));
 
         if (arr[0] > arr[size - 1]) return error.SortError;
-        self.mode = 0;
+        self.result = @floatFromInt(arr[0] + arr[size - 1]);
     } else if (self.mode == 3) {
         // 3. Engine API Call Overhead (100,000 calls)
         var target_x: f32 = 10.0;
@@ -96,7 +101,7 @@ pub fn process(self: *Self, delta: f64) !void {
             target_x = @as(f32, @floatCast(p[0] + 0.001));
             target_y = @as(f32, @floatCast(p[1] + 0.001));
         }
-        self.mode = 0;
+        self.result = @as(f64, target_x + target_y);
     } else if (self.mode == 4) {
         // 4. Batch Node Updates (2,000 nodes via parent container)
         const node = self.base.asNode();
@@ -104,17 +109,22 @@ pub fn process(self: *Self, delta: f64) !void {
         const child_count = try parent.getChildCount(false);
 
         var c: i32 = 0;
+        var index: i32 = 0;
         while (c < child_count) : (c += 1) {
             const child_node = (try parent.getChild(c, false)) orelse continue;
+            if (child_node.owner == self.base.owner) continue;
             const node2d = gd.Node2D{ .owner = child_node.owner };
-            const fc = @as(f32, @floatFromInt(c));
+            const fc = @as(f32, @floatFromInt(index));
             try node2d.setPosition(.{ fc * 1.5, fc * 2.5 });
             try node2d.setRotation(fc * 0.01);
-            try node2d.asCanvasItem().setVisible(@rem(c, 2) == 0);
+            try node2d.asCanvasItem().setVisible(@rem(index, 2) == 0);
+            index += 1;
         }
 
-        self.mode = 0;
-    }
+        self.result = @floatFromInt(index);
+    } else return;
+    self.elapsed_usec = @intCast(gd.getTicksUsec() - started);
+    self.mode = 0;
 }
 
 fn quicksort(arr: []i64, low: isize, high: isize) void {

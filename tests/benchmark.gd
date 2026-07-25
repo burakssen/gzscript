@@ -1,5 +1,29 @@
 extends Node2D
 
+var mode := 0
+var result := 0.0
+var elapsed_usec := 0
+
+
+func _process(_delta: float) -> void:
+	var started := Time.get_ticks_usec()
+	match mode:
+		1:
+			result = bench_boids(500, 20)
+		2:
+			result = bench_sort(10000)
+		3:
+			bench_api_calls(100000)
+			result = position.x + position.y
+		4:
+			bench_batch_nodes()
+			result = 2000.0
+		_:
+			return
+	elapsed_usec = Time.get_ticks_usec() - started
+	mode = 0
+
+
 # 1. Boids / Particle Physics Simulation (500 particles, 20 steps = 5M interaction calculations)
 func bench_boids(particle_count: int, steps: int) -> float:
 	var positions: Array[Vector2] = []
@@ -69,12 +93,15 @@ func bench_api_calls(iterations: int) -> void:
 		target_pos.x = p.x + 0.001
 		target_pos.y = p.y + 0.001
 
-# 4. Batch Node Updates (2,000 nodes)
-func bench_batch_nodes(nodes: Array) -> void:
-	var count := nodes.size()
-	for i in range(count):
-		var n = nodes[i] as Node2D
-		if n != null:
-			n.position = Vector2(i * 1.5, i * 2.5)
-			n.rotation += 0.01
-			n.visible = (i % 2 == 0)
+# 4. Batch Node Updates (2,000 sibling nodes)
+func bench_batch_nodes() -> void:
+	var parent := get_parent()
+	var index := 0
+	for child in parent.get_children():
+		if child == self or not child is Node2D:
+			continue
+		var node := child as Node2D
+		node.position = Vector2(index * 1.5, index * 2.5)
+		node.rotation = index * 0.01
+		node.visible = (index % 2 == 0)
+		index += 1

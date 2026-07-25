@@ -27,74 +27,65 @@ func _run_benchmarks() -> void:
 		return
 
 	# --- 1. GDScript Workloads ---
-	print("[*] Running GDScript Workloads...")
+	print("[BENCHMARK] Running GDScript workloads...")
 	var gd_node := Node2D.new()
 	gd_node.set_script(gdscript_bench_script)
 	root.add_child(gd_node)
-
-	# Warmup
-	gd_node.bench_boids(50, 2)
+	await process_frame
 
 	# Workload 1: Boids Physics (GDScript)
-	var t0 := Time.get_ticks_usec()
-	gd_node.bench_boids(500, 20)
-	var gd_boids_us := Time.get_ticks_usec() - t0
+	var gd_boids_us := await _measure_workload(gd_node, 1, "GDScript boids")
+	if gd_boids_us < 0:
+		return
 
 	# Workload 2: QuickSort (GDScript)
-	t0 = Time.get_ticks_usec()
-	gd_node.bench_sort(10000)
-	var gd_sort_us := Time.get_ticks_usec() - t0
+	var gd_sort_us := await _measure_workload(gd_node, 2, "GDScript sort")
+	if gd_sort_us < 0:
+		return
 
 	# Workload 3: API Call Overhead (GDScript)
-	t0 = Time.get_ticks_usec()
-	gd_node.bench_api_calls(100000)
-	var gd_api_us := Time.get_ticks_usec() - t0
+	var gd_api_us := await _measure_workload(gd_node, 3, "GDScript API calls")
+	if gd_api_us < 0:
+		return
 
 	# Workload 4: Batch Node Updates (GDScript - 2,000 nodes)
-	var batch_container := Node2D.new()
-	root.add_child(batch_container)
-	var children: Array[Node2D] = []
-	for i in range(2000):
-		var child := Node2D.new()
-		batch_container.add_child(child)
-		children.append(child)
+	var batch_container := _create_batch_container()
+	gd_node.reparent(batch_container)
+	var gd_batch_us := await _measure_workload(gd_node, 4, "GDScript batch updates")
+	if gd_batch_us < 0 or not _verify_batch(batch_container):
+		return
 
-	t0 = Time.get_ticks_usec()
-	gd_node.bench_batch_nodes(children)
-	var gd_batch_us := Time.get_ticks_usec() - t0
-
-	gd_node.queue_free()
+	gd_node.free()
+	batch_container.free()
 
 	# --- 2. Zig (gzscript) Workloads ---
-	print("[*] Running Zig (gzscript) Workloads...")
+	print("[BENCHMARK] Running Zig workloads...")
 	var zig_node := Node2D.new()
 	zig_node.set_script(zig_bench_script)
 	root.add_child(zig_node)
 	await process_frame
 
 	# Workload 1: Boids Physics (Zig)
-	t0 = Time.get_ticks_usec()
-	zig_node.set("mode", 1)
-	await process_frame
-	var zig_boids_us := Time.get_ticks_usec() - t0
+	var zig_boids_us := await _measure_workload(zig_node, 1, "Zig boids")
+	if zig_boids_us < 0:
+		return
 
 	# Workload 2: QuickSort (Zig)
-	t0 = Time.get_ticks_usec()
-	zig_node.set("mode", 2)
-	await process_frame
-	var zig_sort_us := Time.get_ticks_usec() - t0
+	var zig_sort_us := await _measure_workload(zig_node, 2, "Zig sort")
+	if zig_sort_us < 0:
+		return
 
 	# Workload 3: API Call Overhead (Zig)
-	t0 = Time.get_ticks_usec()
-	zig_node.set("mode", 3)
-	await process_frame
-	var zig_api_us := Time.get_ticks_usec() - t0
+	var zig_api_us := await _measure_workload(zig_node, 3, "Zig API calls")
+	if zig_api_us < 0:
+		return
 
 	# Workload 4: Batch Node Updates (Zig - 2,000 nodes)
-	t0 = Time.get_ticks_usec()
-	zig_node.set("mode", 4)
-	await process_frame
-	var zig_batch_us := Time.get_ticks_usec() - t0
+	batch_container = _create_batch_container()
+	zig_node.reparent(batch_container)
+	var zig_batch_us := await _measure_workload(zig_node, 4, "Zig batch updates")
+	if zig_batch_us < 0 or not _verify_batch(batch_container):
+		return
 
 	zig_node.queue_free()
 	batch_container.queue_free()
@@ -123,3 +114,76 @@ func _run_benchmarks() -> void:
 
 	print("GZSCRIPT_PROFILING_COMPLETE")
 	quit(0)
+
+
+func _run_workload(node: Node2D, mode: int, label: String) -> int:
+	node.set("result", 0.0)
+	node.set("elapsed_usec", 0)
+	node.set("mode", mode)
+	var deadline := Time.get_ticks_msec() + 60_000
+	while node.get("mode") != 0 and Time.get_ticks_msec() < deadline:
+		await process_frame
+	if node.get("mode") != 0:
+		push_error("Benchmark workload did not complete: " + label)
+		quit(1)
+		return -1
+	if float(node.get("result")) <= 0.0:
+		push_error("Benchmark workload produced an invalid result: " + label)
+		quit(1)
+		return -1
+	var elapsed := int(node.get("elapsed_usec"))
+	if elapsed <= 0:
+		push_error("Benchmark workload produced an invalid duration: " + label)
+		quit(1)
+		return -1
+	return elapsed
+
+
+func _measure_workload(node: Node2D, mode: int, label: String) -> int:
+	if mode == 4:
+		_reset_batch(node.get_parent())
+	if await _run_workload(node, mode, label + " warmup") < 0:
+		return -1
+	var samples: Array[int] = []
+	for _sample in range(5):
+		if mode == 4:
+			_reset_batch(node.get_parent())
+		var elapsed := await _run_workload(node, mode, label)
+		if elapsed < 0:
+			return -1
+		samples.push_back(elapsed)
+	samples.sort()
+	return samples[samples.size() / 2]
+
+
+func _create_batch_container() -> Node2D:
+	var container := Node2D.new()
+	root.add_child(container)
+	for _index in range(2000):
+		container.add_child(Node2D.new())
+	return container
+
+
+func _reset_batch(container: Node2D) -> void:
+	var nodes := container.get_children()
+	for index in range(nodes.size() - 1):
+		var node := nodes[index] as Node2D
+		node.position = Vector2(-1.0, -1.0)
+		node.rotation = -1.0
+		node.visible = true
+
+
+func _verify_batch(container: Node2D) -> bool:
+	var nodes := container.get_children()
+	var benchmark := nodes.back() as Node2D
+	if nodes.size() != 2001 or benchmark == null or int(benchmark.get("result")) != 2000:
+		push_error("Batch benchmark did not contain exactly 2,000 data nodes")
+		quit(1)
+		return false
+	for index in [0, 999, 1999]:
+		var node := nodes[index] as Node2D
+		if node == null or not node.position.is_equal_approx(Vector2(index * 1.5, index * 2.5)) or not is_equal_approx(node.rotation, index * 0.01) or node.visible != (index % 2 == 0):
+			push_error("Batch benchmark did not update all 2,000 nodes")
+			quit(1)
+			return false
+	return true
