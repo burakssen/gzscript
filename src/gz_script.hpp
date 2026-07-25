@@ -5,15 +5,19 @@
 #include <godot_cpp/classes/script_extension.hpp>
 #include <godot_cpp/classes/script_language.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <unordered_set>
 
 class GzScript : public godot::ScriptExtension {
   GDCLASS(GzScript, godot::ScriptExtension)
 
+  friend class GzBuildManager;
+
   godot::String source;
   std::shared_ptr<GzCompiledModule> module;
   bool valid = false;
+  uint64_t compile_generation = 0;
   mutable std::unordered_set<void *> placeholders;
   mutable std::unordered_set<void *> instances;
   static std::unordered_set<GzScript *> scripts;

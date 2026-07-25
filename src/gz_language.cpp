@@ -1,14 +1,20 @@
 #include "gz_language.hpp"
 
+#include "gz_build_manager.hpp"
 #include "gz_script.hpp"
 
+#include <godot_cpp/classes/class_db_singleton.hpp>
 #include <godot_cpp/core/memory.hpp>
 
 using namespace godot;
 
 GzLanguage *GzLanguage::singleton = nullptr;
 
-void GzLanguage::_bind_methods() {}
+void GzLanguage::_bind_methods()
+{
+  ClassDB::bind_method(D_METHOD("make_template_for_base", "base_class_name"),
+                       &GzLanguage::make_template_for_base);
+}
 
 GzLanguage::GzLanguage() { singleton = this; }
 GzLanguage::~GzLanguage()
@@ -64,11 +70,21 @@ PackedStringArray GzLanguage::_get_string_delimiters() const
 }
 
 Ref<Script> GzLanguage::_make_template(const String &, const String &,
-                                       const String &base_class_name) const
+                                        const String &base_class_name) const
 {
   Ref<GzScript> script;
   script.instantiate();
   String base = base_class_name.is_empty() ? "Node" : base_class_name;
+  for (const char *supported :
+       {"Sprite2D", "Node2D", "Control", "Node3D", "CanvasItem", "Node"})
+  {
+    if (ClassDBSingleton::get_singleton()->is_parent_class(
+            StringName(base), StringName(supported)))
+    {
+      base = supported;
+      break;
+    }
+  }
   script->set_source("const gd = @import(\"godot\");\n\n"
                      "pub const Base = gd." +
                      base +
@@ -82,6 +98,12 @@ Ref<Script> GzLanguage::_make_template(const String &, const String &,
                      "    _ = self;\n"
                      "}\n");
   return script;
+}
+
+Ref<Script>
+GzLanguage::make_template_for_base(const String &base_class_name) const
+{
+  return _make_template(String(), String(), base_class_name);
 }
 
 TypedArray<Dictionary>
@@ -224,7 +246,10 @@ TypedArray<Dictionary> GzLanguage::_debug_get_current_stack_info()
   return {};
 }
 
-void GzLanguage::_reload_all_scripts() {}
+void GzLanguage::_reload_all_scripts()
+{
+  GzBuildManager::get_singleton()->compile_all();
+}
 
 void GzLanguage::_reload_scripts(const Array &scripts, bool soft_reload)
 {
@@ -266,7 +291,7 @@ GzLanguage::_profiling_get_frame_data(ScriptLanguageExtensionProfilingInfo *,
 {
   return 0;
 }
-void GzLanguage::_frame() {}
+void GzLanguage::_frame() { GzBuildManager::get_singleton()->pump(); }
 bool GzLanguage::_handles_global_class_type(const String &) const
 {
   return false;

@@ -5,6 +5,10 @@ var rebuild_timer: Timer
 var inspector_refresh_queued := false
 
 
+func _process(_delta: float) -> void:
+	GzBuildManager.pump()
+
+
 func _enter_tree() -> void:
 	rebuild_timer = Timer.new()
 	rebuild_timer.one_shot = true
@@ -67,8 +71,7 @@ func _refresh_inspector() -> void:
 
 
 func _rebuild_loaded_scripts() -> void:
-	if not GzBuildManager.compile_all():
-		push_error(GzBuildManager.get_last_diagnostics())
+	GzBuildManager.queue_all()
 
 
 func _build() -> bool:

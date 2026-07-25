@@ -29,14 +29,20 @@ func _initialize() -> void:
 	worker.start(_compile_on_worker)
 	if not _require(not worker.wait_to_finish(), "worker-thread compilation was not rejected"):
 		return
-	if not _require(GzBuildManager.get_last_diagnostics().contains("main thread"), "worker-thread rejection produced no actionable diagnostic"):
-		return
 
-	var before := _module_count()
+	var before_files := _module_files()
+	var before := before_files.size()
 	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "initial fixture compile failed"):
 		return
-	var after_initial := _module_count()
+	var after_files := _module_files()
+	var after_initial := after_files.size()
 	if not _require(after_initial == before + 1, "initial compile did not create one module"):
+		return
+	var new_modules := after_files.filter(func(path: String) -> bool: return path not in before_files)
+	if not _require(new_modules.size() == 1, "unable to identify initial cache module"):
+		return
+	_write(new_modules[0], "not a native library")
+	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "corrupt cache module was not rebuilt automatically"):
 		return
 
 	_write(HELPER_PATH, "pub const value: i64 = 2;\n")
@@ -88,12 +94,21 @@ func _initialize() -> void:
 
 
 func _module_count() -> int:
+	return _module_files().size()
+
+
+func _module_files() -> Array[String]:
 	var platform := OS.get_name().to_lower()
 	if platform == "macos":
 		platform = "macos"
 	var path := "res://.godot/gzscript/modules/%s-%s" % [platform, Engine.get_architecture_name()]
 	var directory := DirAccess.open(path)
-	return 0 if directory == null else directory.get_files().size()
+	if directory == null:
+		return []
+	var result: Array[String] = []
+	for file in directory.get_files():
+		result.push_back(path.path_join(file))
+	return result
 
 
 func _compile_on_worker() -> bool:

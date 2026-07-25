@@ -1,7 +1,7 @@
 @tool
 extends SceneTree
 
-const SCRIPT_PATH := "res://.godot/gzscript/editor_test.zig"
+const SCRIPT_PATH := "res://editor_test.zig"
 const SCRIPT_SOURCE := """const gd = @import("godot");
 
 pub const Base = gd.Sprite2D;
@@ -45,6 +45,7 @@ func _init() -> void:
 
 
 func _open_zig_script() -> void:
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SCRIPT_PATH.get_base_dir()))
 	var script := GzScript.new()
 	script.source_code = SCRIPT_SOURCE
 	var sprite := Sprite2D.new()
@@ -54,6 +55,8 @@ func _open_zig_script() -> void:
 		sprite.free()
 		_cleanup()
 		quit(1)
+		return
+	if not await _wait_for_compilation():
 		return
 	var exported_speed := false
 	for property in sprite.get_property_list():
@@ -82,6 +85,8 @@ func _open_zig_script() -> void:
 		_cleanup()
 		quit(1)
 		return
+	if not await _wait_for_compilation():
+		return
 	var export_names: Array[StringName] = []
 	for property in sprite.get_property_list():
 		if property.name in [&"speed", &"amplitude"]:
@@ -105,6 +110,13 @@ func _open_zig_script() -> void:
 		_cleanup()
 		quit(1)
 		return
+	var label_template := lang.make_template_for_base("Label")
+	if label_template == null or not label_template.source_code.contains("pub const Base = gd.Control;"):
+		push_error("Unsupported subclasses do not use their nearest generated base")
+		sprite.free()
+		_cleanup()
+		quit(1)
+		return
 	print("GZSCRIPT_LANGUAGE_OK")
 	await process_frame
 	editor_interface.inspect_object(null)
@@ -112,6 +124,19 @@ func _open_zig_script() -> void:
 	sprite.free()
 	_cleanup()
 	quit()
+
+
+func _wait_for_compilation() -> bool:
+	var deadline := Time.get_ticks_msec() + 60_000
+	while Time.get_ticks_msec() < deadline:
+		GzBuildManager.pump()
+		if not GzBuildManager.is_compiling():
+			return true
+		await create_timer(0.01).timeout
+	push_error("Timed out waiting for Zig compilation")
+	_cleanup()
+	quit(1)
+	return false
 
 
 func _cleanup() -> void:

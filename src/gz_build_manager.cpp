@@ -11,6 +11,7 @@
 #include <godot_cpp/classes/thread.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
@@ -200,6 +201,10 @@ void GzBuildManager::_bind_methods()
   ClassDB::bind_method(D_METHOD("compile_path", "resource_path"),
                        &GzBuildManager::compile_path);
   ClassDB::bind_method(D_METHOD("compile_all"), &GzBuildManager::compile_all);
+  ClassDB::bind_method(D_METHOD("queue_all"), &GzBuildManager::queue_all);
+  ClassDB::bind_method(D_METHOD("pump"), &GzBuildManager::pump);
+  ClassDB::bind_method(D_METHOD("is_compiling"),
+                       &GzBuildManager::is_compiling);
   ClassDB::bind_method(D_METHOD("get_last_diagnostics"),
                        &GzBuildManager::get_last_diagnostics);
   ADD_SIGNAL(MethodInfo("script_compiled"));
@@ -239,24 +244,29 @@ GzBuildManager::GzBuildManager()
 
 GzBuildManager::~GzBuildManager()
 {
+  if (active)
+  {
+    OS::get_singleton()->kill(active->pid);
+    DirAccess::remove_absolute(active->plan.compile_output);
+  }
+  pending.clear();
+  active.reset();
   if (singleton == this)
   {
     singleton = nullptr;
   }
 }
 
-std::shared_ptr<GzCompiledModule>
-GzBuildManager::compile(const String &resource_path, const String &source)
+bool GzBuildManager::prepare(const String &resource_path, const String &source,
+                             uint64_t request_id, CompilePlan &plan)
 {
-  last_diagnostics = String();
-  // Godot resources and loaded modules stay single-threaded instead
-  // of adding locks around their full lifecycle.
   if (!Thread::is_main_thread())
   {
-    last_diagnostics = "Zig scripts must be compiled on the main thread";
-    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-    return {};
+    UtilityFunctions::printerr(
+        "gzscript: Zig scripts must be compiled on the main thread");
+    return false;
   }
+  last_diagnostics = String();
   String project_root =
       ProjectSettings::get_singleton()->globalize_path("res://");
   String cache_root = project_root.path_join(".godot/gzscript");
@@ -268,7 +278,7 @@ GzBuildManager::compile(const String &resource_path, const String &source)
     last_diagnostics = "gzscript runtime compilation is only supported on "
                        "macOS, Linux, and Windows";
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-    return {};
+    return false;
   }
   String module_directory =
       cache_root.path_join("modules/" + platform + "-" + architecture);
@@ -282,7 +292,7 @@ GzBuildManager::compile(const String &resource_path, const String &source)
     last_diagnostics = "Unable to create gzscript cache directories (Error " +
                        String::num_int64(directory_error) + ")";
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-    return {};
+    return false;
   }
 
   String source_path =
@@ -291,7 +301,7 @@ GzBuildManager::compile(const String &resource_path, const String &source)
   {
     last_diagnostics = "Zig script not found: " + source_path;
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-    return {};
+    return false;
   }
   String normalized_source = normalize_source(source);
   if (normalize_source(FileAccess::get_file_as_string(source_path)) !=
@@ -301,7 +311,7 @@ GzBuildManager::compile(const String &resource_path, const String &source)
                        " does not match the file on disk; save it before "
                        "compiling";
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-    return {};
+    return false;
   }
 
   ProjectSettings *settings = ProjectSettings::get_singleton();
@@ -311,7 +321,7 @@ GzBuildManager::compile(const String &resource_path, const String &source)
   {
     last_diagnostics = "Unsupported Zig optimization mode: " + optimization;
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-    return {};
+    return false;
   }
 
   String zig_executable = get_zig_executable();
@@ -327,7 +337,7 @@ GzBuildManager::compile(const String &resource_path, const String &source)
     if (!zig_version.is_empty())
       last_diagnostics += "\n" + zig_version;
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-    return {};
+    return false;
   }
 
   String user_fingerprint;
@@ -337,7 +347,7 @@ GzBuildManager::compile(const String &resource_path, const String &source)
   {
     last_diagnostics = fingerprint_error;
     UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-    return {};
+    return false;
   }
   String sdk_fingerprint;
   String sdk_root = zig_path(String());
@@ -362,92 +372,106 @@ GzBuildManager::compile(const String &resource_path, const String &source)
   append_identity(identity, "platform", platform);
   append_identity(identity, "architecture", architecture);
   append_identity(identity, "optimization", optimization);
-  String key = identity.sha256_text();
-  String generated = cache_root.path_join("generated/script_" + key + ".zig");
-  String output = module_directory.path_join("script_" + key + extension);
+  plan.resource_path = resource_path;
+  plan.source = source;
+  plan.key = identity.sha256_text();
+  plan.generated =
+      cache_root.path_join("generated/script_" + plan.key + ".zig");
+  plan.output =
+      module_directory.path_join("script_" + plan.key + extension);
+  plan.needs_compile = !FileAccess::file_exists(plan.output);
+  plan.zig_executable = zig_executable;
+  if (!plan.needs_compile)
+    return true;
 
-  if (!FileAccess::file_exists(output))
+  plan.compile_output = cache_root.path_join(
+      "compile_" + plan.key + "_" +
+      String::num_int64(OS::get_singleton()->get_process_id()) + "_" +
+      String::num_int64(request_id) + extension);
+  String compiler_cache = cache_root.path_join(
+      "zig-cache/" +
+      String::num_int64(OS::get_singleton()->get_process_id()));
+  Error compiler_cache_error =
+      DirAccess::make_dir_recursive_absolute(compiler_cache);
+  if (compiler_cache_error != OK)
   {
-    if (!write_text(generated, ADAPTER_SOURCE))
-    {
-      last_diagnostics = "Unable to write generated Zig adapter: " + generated;
-      UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-      return {};
-    }
-    String compile_output = cache_root.path_join(
-        "compile_" + key + "_" +
-        String::num_int64(OS::get_singleton()->get_process_id()) + extension);
-    String compiler_cache = cache_root.path_join(
-        "zig-cache/" +
-        String::num_int64(OS::get_singleton()->get_process_id()));
-    Error compiler_cache_error = DirAccess::make_dir_recursive_absolute(
-        compiler_cache);
-    if (compiler_cache_error != OK)
-    {
-      last_diagnostics = "Unable to create Zig compiler cache directories "
-                         "(Error " +
-                         String::num_int64(compiler_cache_error) + ")";
-      UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-      return {};
-    }
-    DirAccess::remove_absolute(compile_output);
-    PackedStringArray arguments;
-    arguments.push_back("build-lib");
-    arguments.push_back("-dynamic");
-    arguments.push_back("-O");
-    arguments.push_back(optimization);
-    arguments.push_back("--cache-dir");
-    arguments.push_back(compiler_cache);
-    arguments.push_back("-femit-bin=" + compile_output);
-    arguments.push_back("--dep");
-    arguments.push_back("godot");
-    arguments.push_back("--dep");
-    arguments.push_back("user_script");
-    arguments.push_back("-Mroot=" + generated);
-    arguments.push_back("--dep");
-    arguments.push_back("godot");
-    arguments.push_back("-Muser_script=" + source_path);
-    arguments.push_back("-Mgodot=" + zig_path("godot.zig"));
+    last_diagnostics = "Unable to create Zig compiler cache directories "
+                       "(Error " +
+                       String::num_int64(compiler_cache_error) + ")";
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return false;
+  }
 
-    Array output_lines;
-    int exit_code = OS::get_singleton()->execute(zig_executable, arguments,
-                                                 output_lines, true);
-    last_diagnostics = joined_output(output_lines);
-    if (exit_code != 0)
+  plan.arguments.push_back("build-lib");
+  plan.arguments.push_back("-dynamic");
+  plan.arguments.push_back("-O");
+  plan.arguments.push_back(optimization);
+  plan.arguments.push_back("--cache-dir");
+  plan.arguments.push_back(compiler_cache);
+  plan.arguments.push_back("-femit-bin=" + plan.compile_output);
+  plan.arguments.push_back("--dep");
+  plan.arguments.push_back("godot");
+  plan.arguments.push_back("--dep");
+  plan.arguments.push_back("user_script");
+  plan.arguments.push_back("-Mroot=" + plan.generated);
+  plan.arguments.push_back("--dep");
+  plan.arguments.push_back("godot");
+  plan.arguments.push_back("-Muser_script=" + source_path);
+  plan.arguments.push_back("-Mgodot=" + zig_path("godot.zig"));
+  return true;
+}
+
+std::shared_ptr<GzCompiledModule>
+GzBuildManager::finish(const CompilePlan &plan, int exit_code,
+                       const String &compiler_output)
+{
+  last_diagnostics = compiler_output.strip_edges();
+  if (exit_code != 0)
+  {
+    DirAccess::remove_absolute(plan.compile_output);
+    last_diagnostics =
+        "Compilation failed for " + plan.resource_path + " (exit " +
+        String::num_int64(exit_code) + ")" +
+        (last_diagnostics.is_empty() ? String()
+                                     : String("\n") + last_diagnostics);
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
+  }
+
+  if (plan.needs_compile)
+  {
+    Error publish_error = OK;
+    if (!FileAccess::file_exists(plan.output))
     {
-      DirAccess::remove_absolute(compile_output);
-      last_diagnostics =
-          "Compilation failed for " + resource_path + " (exit " +
-          String::num_int64(exit_code) + ")" +
-          (last_diagnostics.is_empty() ? String()
-                                       : String("\n") + last_diagnostics);
-      UtilityFunctions::printerr("gzscript: ", last_diagnostics);
-      return {};
-    }
-    Error publish_error = DirAccess::copy_absolute(compile_output, output);
-    DirAccess::remove_absolute(compile_output);
-    if (publish_error != OK && FileAccess::file_exists(output))
-    {
-      // An identical cache key means another process published the
-      // same module first; no cross-process lock is needed.
-      publish_error = OK;
+      publish_error =
+          DirAccess::rename_absolute(plan.compile_output, plan.output);
+      if (publish_error != OK && FileAccess::file_exists(plan.output))
+        publish_error = OK;
     }
     if (publish_error != OK)
     {
+      DirAccess::remove_absolute(plan.compile_output);
       last_diagnostics =
-          "Failed to publish compiled module " + output + " (Error " +
+          "Failed to publish compiled module " + plan.output + " (Error " +
           String::num_int64(publish_error) + ")";
       UtilityFunctions::printerr("gzscript: ", last_diagnostics);
       return {};
     }
-    last_diagnostics = String();
   }
 
   String error;
-  auto module = GzCompiledModule::load(output, error);
+  auto module = GzCompiledModule::load(plan.output, error);
+  if (!module && plan.needs_compile &&
+      FileAccess::file_exists(plan.compile_output))
+  {
+    DirAccess::remove_absolute(plan.output);
+    if (DirAccess::rename_absolute(plan.compile_output, plan.output) == OK)
+      module = GzCompiledModule::load(plan.output, error);
+  }
+  DirAccess::remove_absolute(plan.compile_output);
   if (!module)
   {
-    DirAccess::remove_absolute(output);
+    DirAccess::remove_absolute(plan.output);
     last_diagnostics = error;
     UtilityFunctions::printerr("gzscript: ", error);
   }
@@ -459,6 +483,245 @@ GzBuildManager::compile(const String &resource_path, const String &source)
   return module;
 }
 
+std::shared_ptr<GzCompiledModule>
+GzBuildManager::compile(const String &resource_path, const String &source)
+{
+  wait_for_all();
+  CompilePlan plan;
+  if (!prepare(resource_path, source, next_request_id++, plan))
+    return {};
+  if (!plan.needs_compile)
+  {
+    auto module = finish(plan, 0, String());
+    if (module)
+      return module;
+    if (!prepare(resource_path, source, next_request_id++, plan))
+      return {};
+    if (!plan.needs_compile)
+      return {};
+  }
+  if (!write_text(plan.generated, ADAPTER_SOURCE))
+  {
+    last_diagnostics =
+        "Unable to write generated Zig adapter: " + plan.generated;
+    UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+    return {};
+  }
+  DirAccess::remove_absolute(plan.compile_output);
+  Array output_lines;
+  int exit_code = OS::get_singleton()->execute(
+      plan.zig_executable, plan.arguments, output_lines, true);
+  return finish(plan, exit_code, joined_output(output_lines));
+}
+
+void GzBuildManager::queue_compile(const Ref<GzScript> &script)
+{
+  if (!Thread::is_main_thread())
+  {
+    UtilityFunctions::printerr(
+        "gzscript: Zig compilation must be queued on the main thread");
+    return;
+  }
+  if (script.is_null() || script->get_path().is_empty())
+    return;
+  CompileRequest request{script, script->get_path(), script->source,
+                         ++script->compile_generation};
+  for (CompileRequest &queued : pending)
+  {
+    if (queued.script.ptr() == script.ptr())
+    {
+      queued = std::move(request);
+      start_next();
+      return;
+    }
+  }
+  pending.push_back(std::move(request));
+  start_next();
+}
+
+void GzBuildManager::queue_all()
+{
+  if (!Thread::is_main_thread())
+  {
+    UtilityFunctions::printerr(
+        "gzscript: Zig compilation must be queued on the main thread");
+    return;
+  }
+  for (GzScript *script : GzScript::get_scripts())
+  {
+    if (script->get_path().is_empty())
+      continue;
+    script->set_source(FileAccess::get_file_as_string(script->get_path()));
+    queue_compile(Ref<GzScript>(script));
+  }
+}
+
+bool GzBuildManager::is_compiling() const
+{
+  return Thread::is_main_thread() && (active != nullptr || !pending.empty());
+}
+
+void GzBuildManager::start_next()
+{
+  // ponytail: Serialize builds to avoid cache races and cap Zig memory use.
+  while (!active && !pending.empty())
+  {
+    CompileRequest request = std::move(pending.front());
+    pending.pop_front();
+    if (request.generation != request.script->compile_generation)
+      continue;
+
+    CompilePlan plan;
+    if (!prepare(request.resource_path, request.source, next_request_id++, plan))
+    {
+      request.script->valid = false;
+      request.script->emit_changed();
+      continue;
+    }
+    if (!plan.needs_compile)
+    {
+      auto module = finish(plan, 0, String());
+      if (module)
+      {
+        request.script->module = std::move(module);
+        request.script->valid = true;
+        request.script->_update_exports();
+      }
+      else
+      {
+        if (!FileAccess::file_exists(plan.output))
+          pending.push_front(std::move(request));
+        else
+        {
+          request.script->valid = false;
+          request.script->emit_changed();
+        }
+      }
+      continue;
+    }
+    if (!write_text(plan.generated, ADAPTER_SOURCE))
+    {
+      last_diagnostics =
+          "Unable to write generated Zig adapter: " + plan.generated;
+      UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+      request.script->valid = false;
+      request.script->emit_changed();
+      continue;
+    }
+    DirAccess::remove_absolute(plan.compile_output);
+    Dictionary process = OS::get_singleton()->execute_with_pipe(
+        plan.zig_executable, plan.arguments, false);
+    if (process.is_empty())
+    {
+      last_diagnostics = "Unable to start Zig compiler: " + plan.zig_executable;
+      UtilityFunctions::printerr("gzscript: ", last_diagnostics);
+      request.script->valid = false;
+      request.script->emit_changed();
+      continue;
+    }
+    active = std::make_unique<ActiveCompile>();
+    active->request = std::move(request);
+    active->plan = std::move(plan);
+    active->stdout_pipe = process["stdio"];
+    active->stderr_pipe = process["stderr"];
+    active->pid = process["pid"];
+  }
+}
+
+void GzBuildManager::drain(const Ref<FileAccess> &pipe, std::string &output)
+{
+  if (pipe.is_null())
+    return;
+  int64_t available = pipe->get_length();
+  if (available <= 0)
+    return;
+  PackedByteArray bytes = pipe->get_buffer(available);
+  if (bytes.is_empty())
+    return;
+  output.append(reinterpret_cast<const char *>(bytes.ptr()), bytes.size());
+}
+
+void GzBuildManager::pump()
+{
+  if (!Thread::is_main_thread())
+    return;
+  start_next();
+  if (!active)
+    return;
+  drain(active->stdout_pipe, active->output);
+  drain(active->stderr_pipe, active->output);
+  if (OS::get_singleton()->is_process_running(active->pid))
+    return;
+  drain(active->stdout_pipe, active->output);
+  drain(active->stderr_pipe, active->output);
+  complete_active(OS::get_singleton()->get_process_exit_code(active->pid));
+}
+
+void GzBuildManager::complete_active(int exit_code)
+{
+  std::unique_ptr<ActiveCompile> completed = std::move(active);
+  if (completed->stdout_pipe.is_valid())
+    completed->stdout_pipe->close();
+  if (completed->stderr_pipe.is_valid())
+    completed->stderr_pipe->close();
+  Ref<GzScript> script = completed->request.script;
+  if (completed->request.generation != script->compile_generation)
+  {
+    DirAccess::remove_absolute(completed->plan.compile_output);
+    start_next();
+    return;
+  }
+
+  if (exit_code == 0)
+  {
+    CompilePlan current;
+    if (!prepare(completed->request.resource_path, completed->request.source,
+                 next_request_id++, current))
+    {
+      DirAccess::remove_absolute(completed->plan.compile_output);
+      script->valid = false;
+      script->emit_changed();
+      start_next();
+      return;
+    }
+    if (current.key != completed->plan.key)
+    {
+      DirAccess::remove_absolute(completed->plan.compile_output);
+      queue_compile(script);
+      return;
+    }
+  }
+
+  auto module = finish(completed->plan, exit_code,
+                       String::utf8(completed->output.data(),
+                                    completed->output.size()));
+  // ponytail: Load modules and mutate Script state only on Godot's main thread.
+  if (module)
+  {
+    script->module = std::move(module);
+    script->valid = true;
+    script->_update_exports();
+  }
+  else
+  {
+    script->valid = false;
+    script->emit_changed();
+  }
+  start_next();
+}
+
+void GzBuildManager::wait_for_all()
+{
+  if (!Thread::is_main_thread())
+    return;
+  while (is_compiling())
+  {
+    pump();
+    if (is_compiling())
+      OS::get_singleton()->delay_msec(1);
+  }
+}
+
 bool GzBuildManager::compile_path(const String &resource_path)
 {
   return compile(resource_path,
@@ -467,6 +730,8 @@ bool GzBuildManager::compile_path(const String &resource_path)
 
 bool GzBuildManager::compile_all()
 {
+  wait_for_all();
+  last_diagnostics = String();
   bool success = true;
   String diagnostics;
   for (GzScript *script : GzScript::get_scripts())

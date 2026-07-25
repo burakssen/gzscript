@@ -15,6 +15,8 @@ public:
   GzLanguage();
   ~GzLanguage();
   static GzLanguage *get_singleton() { return singleton; }
+  godot::Ref<godot::Script>
+  make_template_for_base(const godot::String &base_class_name) const;
 
   godot::String _get_name() const override;
   void _init() override;

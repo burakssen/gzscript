@@ -1,8 +1,11 @@
 #include "gz_resource_format.hpp"
 
+#include "gz_build_manager.hpp"
 #include "gz_script.hpp"
 
 #include <godot_cpp/classes/file_access.hpp>
+#include <godot_cpp/classes/thread.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -23,6 +26,13 @@ String GzResourceLoader::_get_resource_type(const String &path) const
 Variant GzResourceLoader::_load(const String &path, const String &, bool,
                                 int32_t) const
 {
+  if (!Thread::is_main_thread())
+  {
+    UtilityFunctions::printerr(
+        "gzscript: threaded resource loading is not supported; load Zig "
+        "scripts on the main thread");
+    return Variant();
+  }
   Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
   if (file.is_null())
     return Variant();
@@ -39,6 +49,12 @@ void GzResourceSaver::_bind_methods() {}
 Error GzResourceSaver::_save(const Ref<Resource> &resource, const String &path,
                              uint32_t)
 {
+  if (!Thread::is_main_thread())
+  {
+    UtilityFunctions::printerr(
+        "gzscript: threaded resource saving is not supported");
+    return ERR_UNAVAILABLE;
+  }
   Ref<GzScript> script = resource;
   if (script.is_null())
     return ERR_INVALID_PARAMETER;
@@ -49,7 +65,7 @@ Error GzResourceSaver::_save(const Ref<Resource> &resource, const String &path,
   file->close();
   script->set_path(path);
   // Persistence success is independent from compilation diagnostics.
-  script->reload(false);
+  GzBuildManager::get_singleton()->queue_compile(script);
   return OK;
 }
 
