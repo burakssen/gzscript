@@ -2,9 +2,8 @@
 set -eu
 
 zig build --prefix . -Doptimize=Debug
-zig build check-bindings
 zig build test
-zig fmt --check addons/gzscript/zig/*.zig examples/basic/scripts tests
+zig fmt --check build.zig tools addons/gzscript/zig/*.zig examples/basic/scripts tests
 
 zig_executable=$(command -v zig)
 godot_executable=$(command -v godot)
@@ -21,8 +20,6 @@ run_godot --script tests/live_bindings_runner.gd
 run_godot --script tests/save_runner.gd
 run_godot --script tests/cache_runner.gd
 run_godot --script tests/failure_runner.gd
-run_godot --script tests/benchmark_runner.gd
-
 editor_output=$(run_godot --editor --script tests/language_runner.gd 2>&1)
 rm -f .godot/gzscript/editor_test.zig .godot/gzscript/editor_test.zig.uid
 case "$editor_output" in

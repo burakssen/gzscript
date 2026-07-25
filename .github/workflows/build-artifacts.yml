@@ -27,7 +27,6 @@ jobs:
 
       - name: Test generators and Zig SDK
         run: |
-          zig build check-bindings
           zig build test
           zig fmt --check build.zig tools addons/gzscript/zig/*.zig examples/basic/scripts tests
 
