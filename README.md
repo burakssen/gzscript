@@ -53,14 +53,23 @@ zls_path**, `GZSCRIPT_ZLS_PATH`, the standard zvm path at `~/.zvm/bin/zls`, or
 `PATH`, in that order. The editor continues to work without ZLS, but semantic
 completion is unavailable.
 
-Completion never blocks the editor thread: the first request starts or queries
-ZLS, and the popup is refreshed after the matching response arrives. Snippets,
+Completion never waits for a ZLS response on the editor thread: requests are
+debounced, only the latest query is sent, and response processing is bounded per
+frame before the popup is refreshed. Snippets,
 hover, diagnostics, formatting, semantic tokens, rename, and references are not
 integrated yet. Save and Run diagnostics continue to come from the Zig compiler.
 
 gzscript resolves the compiler from **Project Settings > Gzscript > Compiler > Zig Path**, then `GZSCRIPT_ZIG_PATH`, then the standard zvm path at `~/.zvm/bin/zig`, and finally `zig` on `PATH`. Set **Zig Path** to an absolute executable path when using another version manager or when Godot is launched from the macOS GUI.
 
-The addon compiles scripts synchronously on initial resource load. Saves and editor filesystem changes launch a serialized asynchronous Zig process so the editor remains responsive. Repeated saves are coalesced and stale results are discarded. Run waits for pending work and performs a final synchronous check; a failed build blocks Run and leaves the `.zig` resource attached.
+The addon compiles scripts synchronously on runtime resource loads. Editor loads,
+saves, and filesystem changes queue a serialized asynchronous Zig process so
+the editor remains responsive. Repeated saves are coalesced and stale results
+are discarded. Run waits for pending work and performs a final synchronous
+check; a failed build blocks Run and leaves the `.zig` resource attached.
+
+Source saves are written and synced to a temporary file before atomically
+replacing the destination. The old path remains readable until the complete new
+source is ready, and successful saves sync the containing directory on POSIX.
 
 Generated adapters and libraries are stored below `.godot/gzscript` and can be deleted safely.
 
@@ -69,14 +78,24 @@ Settings > Gzscript > Compiler > Optimization** to `ReleaseSafe`,
 `ReleaseFast`, or `ReleaseSmall` when measuring runtime performance. The
 optimization mode is part of the module cache identity.
 
-The cache identity includes the script path and source, every regular source or
-embedded-data file below the script's directory, the complete bundled Zig SDK
+The cache identity includes the script path and source, transitive literal
+relative `@import` and `@embedFile` dependencies, the complete bundled Zig SDK
 and generated bindings, the ABI and adapter versions, the selected Zig
 executable and reported version, the platform, architecture, and optimization
-mode. This conservative policy may recompile when an unrelated file in the same
-directory changes, but it does not reuse a module after a relative import or
-`@embedFile` input changes. In-memory source must be saved before compilation so
-the cache identity cannot differ from the file Zig actually compiles.
+mode. Unsupported import expressions conservatively fall back to directory
+fingerprinting. Unrelated project files do not invalidate normal scripts, while
+relative imports and embedded inputs remain tracked. In-memory source must be
+saved before compilation so the cache identity cannot differ from the file Zig
+actually compiles. Successful builds are re-fingerprinted before publication,
+and cache stamps authenticate both the source identity and compiled module
+bytes. A per-key operating-system file lock coordinates separate Godot
+processes; the lock covers the final cache check, compilation, module
+validation, and atomic module/stamp publication.
+
+Compiler processes time out after two minutes. gzscript retains up to 64 KiB of
+compiler output and marks truncated diagnostics while continuing to drain the
+process pipes. Timeout and shutdown cleanup terminate the compiler process group
+and captured descendants before releasing its cache key.
 
 ## Script API
 
@@ -159,7 +178,9 @@ zig build check-bindings
 sh tests/run.sh
 ```
 
-This runs Zig reflection tests, headless lifecycle/property and save integration tests, invalid-source handling, and editor language/export refresh checks.
+This runs Zig reflection tests, headless lifecycle/property and save integration
+tests, cache substitution and mid-build dependency race checks, compiler process
+limits, invalid-source handling, and editor language/export refresh checks.
 When ZLS is installed, the editor test also verifies semantic completion.
 
 Benchmarks are intentionally separate from the correctness gate because shared
