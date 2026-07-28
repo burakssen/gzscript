@@ -17,6 +17,11 @@ class GzBuildManager : public godot::Object {
   static GzBuildManager *singleton;
   godot::String last_diagnostics;
   uint64_t next_request_id = 1;
+  uint64_t current_generation = 0;
+
+  // ponytail: Cache zig version to avoid spawning a subprocess on every prepare().
+  godot::String cached_zig_executable;
+  godot::String cached_zig_version;
 
   struct CompilePlan {
     godot::String resource_path;
@@ -28,6 +33,8 @@ class GzBuildManager : public godot::Object {
     godot::String zig_executable;
     godot::PackedStringArray arguments;
     bool needs_compile = false;
+    godot::String hash_path;
+    godot::String source_hash;
   };
 
   struct CompileRequest {
@@ -44,6 +51,7 @@ class GzBuildManager : public godot::Object {
     godot::Ref<godot::FileAccess> stderr_pipe;
     std::string output;
     int32_t pid = -1;
+    uint64_t started_at_msec = 0;
   };
 
   std::deque<CompileRequest> pending;

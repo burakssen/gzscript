@@ -11,12 +11,16 @@ some_text: []const u8 = "",
 held_texture: ?gd.Texture2D = null,
 enter_tree_notification_received: bool = false,
 
-pub const exports = .{
-    .some_enum = gd.property(.{ .category = "Metadata", .hint = .@"enum", .hint_string = "First,Second,Third" }),
-    .some_file = gd.property(.{ .category = "Metadata", .hint = .file, .hint_string = "*.zig" }),
-    .some_text = gd.property(.{ .hint = .multiline_text }),
-    .held_texture = gd.property(.{}),
-};
+pub const exports = gd.exports(.{
+    gd.category("Metadata"),
+    gd.group("Values", "some_"),
+    gd.field("some_enum", gd.property(.{ .hint = .@"enum", .hint_string = "First,Second,Third" })),
+    gd.field("some_file", gd.property(.{ .hint = .file, .hint_string = "*.zig" })),
+    gd.subgroup("Text", "some_"),
+    gd.field("some_text", gd.property(.{ .hint = .multiline_text })),
+    gd.endGroup(),
+    gd.field("held_texture", gd.property(.{})),
+});
 
 pub const signals = .{
     .verified = gd.signal(.{ .parent = gd.Node, .self_node = gd.Node }),

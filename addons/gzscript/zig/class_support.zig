@@ -1,3 +1,4 @@
+const std = @import("std");
 const abi = @import("abi.zig");
 const codec = @import("codec.zig");
 const runtime = @import("runtime.zig");
@@ -51,12 +52,20 @@ pub fn ptrcallVoid(self: anytype, mb: abi.MethodBind, arguments: anytype) !void 
 fn MethodCache(comptime class_name: []const u8, comptime method_name: []const u8, comptime hash: i64) type {
     return struct {
         var value: abi.MethodBind = null;
+        var state = std.atomic.Value(u8).init(0);
         const class = class_name;
         const method = method_name;
         const method_hash = hash;
 
         fn get() !abi.MethodBind {
-            if (value == null) value = runtime.getMethodBind(class, method, method_hash);
+            if (state.load(.acquire) != 2) {
+                if (state.cmpxchgStrong(0, 1, .acquire, .monotonic) == null) {
+                    value = runtime.getMethodBind(class, method, method_hash);
+                    state.store(2, .release);
+                } else {
+                    while (state.load(.acquire) != 2) std.atomic.spinLoopHint();
+                }
+            }
             return value orelse error.MethodBindNotFound;
         }
     };

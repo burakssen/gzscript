@@ -135,9 +135,21 @@ func _run() -> void:
 	var file_prop := {}
 	var text_prop := {}
 	var metadata_categories := 0
+	var group_prop := {}
+	var subgroup_prop := {}
+	var group_reset := {}
+	var property_order: Array[String] = []
 	for prop in sprite_props:
+		if prop.name in ["Metadata", "Values", "some_enum", "some_file", "Text", "some_text", "", "held_texture"]:
+			property_order.append(prop.name)
 		if prop.name == "Metadata" and prop.usage == PROPERTY_USAGE_CATEGORY:
 			metadata_categories += 1
+		elif prop.name == "Values" and prop.usage == PROPERTY_USAGE_GROUP:
+			group_prop = prop
+		elif prop.name == "Text" and prop.usage == PROPERTY_USAGE_SUBGROUP:
+			subgroup_prop = prop
+		elif prop.name == "" and prop.usage == PROPERTY_USAGE_GROUP:
+			group_reset = prop
 		elif prop.name == "some_enum":
 			enum_prop = prop
 		elif prop.name == "some_file":
@@ -157,7 +169,21 @@ func _run() -> void:
 		return
 	if not _check(metadata_categories == 1, "Repeated export categories produced duplicate Inspector headings"):
 		return
+	if not _check(group_prop.size() > 0 and group_prop.hint_string == "some_", "Export group prefix mismatch"):
+		return
+	if not _check(subgroup_prop.size() > 0 and subgroup_prop.hint_string == "some_", "Export subgroup prefix mismatch"):
+		return
+	if not _check(group_reset.size() > 0, "Export group reset marker missing"):
+		return
+	if not _check(property_order == ["Metadata", "Values", "some_enum", "some_file", "Text", "some_text", "", "held_texture"], "Export Inspector entry order mismatch: %s" % [property_order]):
+		return
 	if not _check(text_prop.hint == PROPERTY_HINT_MULTILINE_TEXT, "some_text hint mismatch"):
+		return
+	if not _check(sprite_probe.property_can_revert("some_enum"), "Exported property cannot revert to its declared default"):
+		return
+	if not _check(sprite_probe.property_get_revert("some_enum") == 0, "Exported property revert value mismatch"):
+		return
+	if not _check(not sprite_probe.property_can_revert("missing_export"), "Unknown property unexpectedly supports revert"):
 		return
 
 	fixture_2d.free()

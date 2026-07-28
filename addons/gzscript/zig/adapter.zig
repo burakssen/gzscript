@@ -58,6 +58,38 @@ fn signalValueType(comptime T: type) abi.ValueType {
     return codec.valueType(T);
 }
 
+fn hasOrderedExports(comptime T: type) bool {
+    return @hasDecl(T, "exports") and @typeInfo(@TypeOf(T.exports)).@"struct".is_tuple;
+}
+
+fn exportCount(comptime T: type) usize {
+    if (!@hasDecl(T, "exports")) return 0;
+    if (comptime !hasOrderedExports(T)) return @typeInfo(@TypeOf(T.exports)).@"struct".fields.len;
+    var count: usize = 0;
+    inline for (T.exports) |entry| switch (entry) {
+        .field => count += 1,
+        else => {},
+    };
+    return count;
+}
+
+fn inspectorEntryCount(comptime T: type) usize {
+    if (!@hasDecl(T, "exports")) return 0;
+    if (comptime hasOrderedExports(T)) return @typeInfo(@TypeOf(T.exports)).@"struct".fields.len;
+
+    var count: usize = 0;
+    var current_category: []const u8 = "";
+    inline for (@typeInfo(@TypeOf(T.exports)).@"struct".fields) |field| {
+        const definition: properties.Property = @field(T.exports, field.name);
+        if (definition.category.len > 0 and !std.mem.eql(u8, definition.category, current_category)) {
+            count += 1;
+            current_category = definition.category;
+        }
+        count += 1;
+    }
+    return count;
+}
+
 fn invokeGeneric(instance: anytype, comptime name: []const u8, arguments: ?[*]const abi.Value, comptime argument_count: u32) abi.Status {
     const ScriptType = @TypeOf(instance.*);
     const method_info = @typeInfo(@TypeOf(@field(ScriptType, name)));
@@ -116,7 +148,8 @@ pub fn ScriptAdapter(comptime Script: type) type {
     if (@FieldType(Script, "base") != Script.Base) @compileError("Zig script base field must have type Script.Base");
     if (!@hasDecl(Script, "init")) @compileError("Zig script must declare pub fn init(ctx: gd.InitContext) !Self");
 
-    const export_count = if (@hasDecl(Script, "exports")) @typeInfo(@TypeOf(Script.exports)).@"struct".fields.len else 0;
+    const export_count = exportCount(Script);
+    const inspector_entry_count = inspectorEntryCount(Script);
     const method_count = methodCount(Script);
     const signal_count = signalCount(Script);
     const signal_argument_count = signalArgumentCount(Script);
@@ -130,6 +163,7 @@ pub fn ScriptAdapter(comptime Script: type) type {
 
         const methods: [method_count]abi.MethodDescriptor = buildMethods();
         const property_descriptors: [export_count]abi.PropertyDescriptor = buildProperties();
+        const inspector_entries: [inspector_entry_count]abi.InspectorEntryDescriptor = buildInspectorEntries();
         const signal_arguments: [signal_argument_count]abi.SignalArgumentDescriptor = buildSignalArguments();
         const signal_descriptors: [signal_count]abi.SignalDescriptor = buildSignals();
 
@@ -148,31 +182,128 @@ pub fn ScriptAdapter(comptime Script: type) type {
         fn buildProperties() [export_count]abi.PropertyDescriptor {
             var result: [export_count]abi.PropertyDescriptor = undefined;
             if (!@hasDecl(Script, "exports")) return result;
-            const export_fields = @typeInfo(@TypeOf(Script.exports)).@"struct".fields;
-            const script_fields = @typeInfo(Script).@"struct".fields;
-            inline for (export_fields, 0..) |export_field, index| {
-                if (!@hasField(Script, export_field.name)) @compileError("export does not match a script field: " ++ export_field.name);
-                const field = comptime find: {
-                    for (script_fields) |candidate| if (std.mem.eql(u8, candidate.name, export_field.name)) break :find candidate;
-                    unreachable;
+            var index: usize = 0;
+            if (comptime hasOrderedExports(Script)) {
+                inline for (Script.exports, 0..) |entry, entry_index| switch (entry) {
+                    .field => |field| {
+                        inline for (Script.exports, 0..) |previous, previous_index| {
+                            if (previous_index < entry_index) switch (previous) {
+                                .field => |previous_field| if (std.mem.eql(u8, field.name, previous_field.name))
+                                    @compileError("duplicate exported field: " ++ field.name),
+                                else => {},
+                            };
+                        }
+                        result[index] = propertyDescriptor(field.name, field.property);
+                        index += 1;
+                    },
+                    else => {},
                 };
-                const default_ptr = field.default_value_ptr orelse @compileError("exported fields require a default value: " ++ field.name);
-                const default_value = @as(*const field.type, @ptrCast(@alignCast(default_ptr))).*;
-                const options: properties.Property = @field(Script.exports, export_field.name);
-                result[index] = .{
-                    .name = .from(export_field.name),
-                    .type = properties.valueType(field.type),
-                    .hint = options.hint,
-                    .hint_string = .from(options.hint_string),
-                    .category = .from(options.category),
-                    .class_name = .from(codec.objectClassName(field.type)),
-                    .range_min = if (options.range) |range| range.min else 0,
-                    .range_max = if (options.range) |range| range.max else 0,
-                    .range_step = if (options.range) |range| range.step else 0,
-                    .default_value = properties.toValue(default_value),
-                };
+            } else {
+                inline for (@typeInfo(@TypeOf(Script.exports)).@"struct".fields) |field| {
+                    result[index] = propertyDescriptor(field.name, @field(Script.exports, field.name));
+                    index += 1;
+                }
             }
             return result;
+        }
+
+        fn propertyDescriptor(comptime name: []const u8, comptime options: properties.Property) abi.PropertyDescriptor {
+            if (!@hasField(Script, name)) @compileError("export does not match a script field: " ++ name);
+            const script_field = comptime find: {
+                for (@typeInfo(Script).@"struct".fields) |candidate|
+                    if (std.mem.eql(u8, candidate.name, name)) break :find candidate;
+                unreachable;
+            };
+            const default_ptr = script_field.default_value_ptr orelse @compileError("exported fields require a default value: " ++ name);
+            const default_value = @as(*const script_field.type, @ptrCast(@alignCast(default_ptr))).*;
+            if ((options.hint == .file or options.hint == .multiline_text) and script_field.type != []const u8)
+                @compileError("property hint requires a string field: " ++ name);
+            if (options.hint == .range and properties.valueType(script_field.type) != .integer and properties.valueType(script_field.type) != .floating)
+                @compileError("property range requires a numeric field: " ++ name);
+            if (options.hint == .@"enum") switch (@typeInfo(script_field.type)) {
+                .@"enum", .int => {},
+                else => @compileError("enum property hint requires an enum or integer field: " ++ name),
+            };
+            return .{
+                .name = .from(name),
+                .type = properties.valueType(script_field.type),
+                .hint = options.hint,
+                .hint_string = .from(options.hint_string),
+                .class_name = .from(codec.objectClassName(script_field.type)),
+                .range_min = if (options.range) |range| range.min else 0,
+                .range_max = if (options.range) |range| range.max else 0,
+                .range_step = if (options.range) |range| range.step else 0,
+                .default_value = properties.toValue(default_value),
+            };
+        }
+
+        fn buildInspectorEntries() [inspector_entry_count]abi.InspectorEntryDescriptor {
+            var result: [inspector_entry_count]abi.InspectorEntryDescriptor = undefined;
+            if (!@hasDecl(Script, "exports")) return result;
+            var index: usize = 0;
+            var property_index: u32 = 0;
+            if (comptime hasOrderedExports(Script)) {
+                var in_group = false;
+                var active_prefix: []const u8 = "";
+                inline for (Script.exports) |entry| {
+                    switch (entry) {
+                        .field => |field| {
+                            if (active_prefix.len > 0 and !std.mem.startsWith(u8, field.name, active_prefix))
+                                @compileError("exported field does not match active group prefix: " ++ field.name);
+                            result[index] = .{
+                                .kind = .property,
+                                .property_index = property_index,
+                                .name = .from(""),
+                                .prefix = .from(""),
+                            };
+                            property_index += 1;
+                        },
+                        .category => |marker| {
+                            result[index] = inspectorMarker(.category, marker);
+                            in_group = false;
+                            active_prefix = "";
+                        },
+                        .group => |marker| {
+                            result[index] = inspectorMarker(.group, marker);
+                            in_group = marker.name.len > 0;
+                            active_prefix = marker.prefix;
+                        },
+                        .subgroup => |marker| {
+                            if (!in_group) @compileError("export subgroup requires an active group: " ++ marker.name);
+                            result[index] = inspectorMarker(.subgroup, marker);
+                            active_prefix = marker.prefix;
+                        },
+                    }
+                    index += 1;
+                }
+            } else {
+                var current_category: []const u8 = "";
+                inline for (@typeInfo(@TypeOf(Script.exports)).@"struct".fields) |field| {
+                    const definition: properties.Property = @field(Script.exports, field.name);
+                    if (definition.category.len > 0 and !std.mem.eql(u8, definition.category, current_category)) {
+                        result[index] = inspectorMarker(.category, .{ .name = definition.category });
+                        current_category = definition.category;
+                        index += 1;
+                    }
+                    result[index] = .{
+                        .kind = .property,
+                        .property_index = property_index,
+                        .name = .from(""),
+                        .prefix = .from(""),
+                    };
+                    property_index += 1;
+                    index += 1;
+                }
+            }
+            return result;
+        }
+
+        fn inspectorMarker(comptime kind: abi.InspectorEntryKind, comptime marker: properties.Marker) abi.InspectorEntryDescriptor {
+            return .{
+                .kind = kind,
+                .name = .from(marker.name),
+                .prefix = .from(marker.prefix),
+            };
         }
 
         fn buildSignalArguments() [signal_argument_count]abi.SignalArgumentDescriptor {
@@ -251,11 +382,24 @@ pub fn ScriptAdapter(comptime Script: type) type {
             const raw = pointer orelse return .invalid_argument;
             const box: *Box = @ptrCast(@alignCast(raw));
             if (!@hasDecl(Script, "exports")) return .property_not_found;
-            inline for (@typeInfo(@TypeOf(Script.exports)).@"struct".fields, 0..) |field, index| {
+            var index: u32 = 0;
+            if (comptime hasOrderedExports(Script)) {
+                inline for (Script.exports) |entry| switch (entry) {
+                    .field => |field| {
+                        if (property_index == index) {
+                            result.* = properties.toValue(@field(box.script, field.name));
+                            return .ok;
+                        }
+                        index += 1;
+                    },
+                    else => {},
+                };
+            } else inline for (@typeInfo(@TypeOf(Script.exports)).@"struct".fields) |field| {
                 if (property_index == index) {
                     result.* = properties.toValue(@field(box.script, field.name));
                     return .ok;
                 }
+                index += 1;
             }
             return .property_not_found;
         }
@@ -264,20 +408,32 @@ pub fn ScriptAdapter(comptime Script: type) type {
             const raw = pointer orelse return .invalid_argument;
             const box: *Box = @ptrCast(@alignCast(raw));
             if (!@hasDecl(Script, "exports")) return .property_not_found;
-            inline for (@typeInfo(@TypeOf(Script.exports)).@"struct".fields, 0..) |field, index| {
-                if (property_index == index) {
-                    const FieldType = @TypeOf(@field(box.script, field.name));
-                    const converted = properties.fromValue(FieldType, value) orelse return .type_mismatch;
-                    @field(box.script, field.name) = if (FieldType == []const u8) replace: {
-                        const replacement = std.heap.page_allocator.dupe(u8, converted) catch return .out_of_memory;
-                        if (box.owned_strings[index]) |previous| std.heap.page_allocator.free(previous);
-                        box.owned_strings[index] = replacement;
-                        break :replace replacement;
-                    } else converted;
-                    return .ok;
-                }
+            var index: u32 = 0;
+            if (comptime hasOrderedExports(Script)) {
+                inline for (Script.exports) |entry| switch (entry) {
+                    .field => |field| {
+                        if (property_index == index) return setField(box, field.name, index, value);
+                        index += 1;
+                    },
+                    else => {},
+                };
+            } else inline for (@typeInfo(@TypeOf(Script.exports)).@"struct".fields) |field| {
+                if (property_index == index) return setField(box, field.name, index, value);
+                index += 1;
             }
             return .property_not_found;
+        }
+
+        fn setField(box: *Box, comptime name: []const u8, index: u32, value: *const abi.Value) abi.Status {
+            const FieldType = @TypeOf(@field(box.script, name));
+            const converted = properties.fromValue(FieldType, value) orelse return .type_mismatch;
+            @field(box.script, name) = if (FieldType == []const u8) replace: {
+                const replacement = std.heap.page_allocator.dupe(u8, converted) catch return .out_of_memory;
+                if (box.owned_strings[index]) |previous| std.heap.page_allocator.free(previous);
+                box.owned_strings[index] = replacement;
+                break :replace replacement;
+            } else converted;
+            return .ok;
         }
 
         fn notification(pointer: ?*anyopaque, what: i32, reversed: bool) callconv(.c) void {
@@ -303,6 +459,8 @@ pub fn ScriptAdapter(comptime Script: type) type {
             .method_count = method_count,
             .properties = if (export_count == 0) null else &property_descriptors,
             .property_count = export_count,
+            .inspector_entries = if (inspector_entry_count == 0) null else &inspector_entries,
+            .inspector_entry_count = inspector_entry_count,
             .signals = if (signal_count == 0) null else &signal_descriptors,
             .signal_count = signal_count,
             .create_instance = create,

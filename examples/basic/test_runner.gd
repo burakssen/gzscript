@@ -25,7 +25,7 @@ func _ready() -> void:
 	assert(zig_script.get_instance_base_type() == "Node2D")
 	var property_names: Array[StringName] = []
 	for property in zig_script.get_script_property_list():
-		if property.usage != PROPERTY_USAGE_CATEGORY:
+		if property.name in [&"amplitude", &"speed"]:
 			property_names.push_back(property.name)
 	assert(property_names == [&"amplitude", &"speed"])
 	assert(zig_script.has_script_signal(&"zig_ready"))

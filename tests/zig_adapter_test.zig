@@ -82,6 +82,29 @@ const ErrorScript = struct {
     }
 };
 
+const GroupedExportsScript = struct {
+    pub const Base = gd.Node;
+
+    base: Base,
+    osc_amplitude: f64 = 10,
+    osc_speed: f64 = 1,
+    debug_text: []const u8 = "",
+
+    pub const exports = gd.exports(.{
+        gd.category("Movement"),
+        gd.group("Oscillation", "osc_"),
+        gd.field("osc_amplitude", gd.property(.{})),
+        gd.subgroup("Timing", "osc_"),
+        gd.field("osc_speed", gd.property(.{})),
+        gd.endGroup(),
+        gd.field("debug_text", gd.property(.{ .hint = .multiline_text })),
+    });
+
+    pub fn init(ctx: gd.InitContext) !@This() {
+        return .{ .base = .{ .owner = ctx.owner } };
+    }
+};
+
 test "adapter logs callback error names" {
     captured_error_len = 0;
     var api = gd.abi.EngineApi{
@@ -167,9 +190,38 @@ test "adapter reflects explicit exports only" {
     const descriptor = gd.ScriptAdapter(TestScript).descriptor;
     try std.testing.expectEqual(@as(u32, 1), descriptor.property_count);
     try std.testing.expectEqualStrings("amplitude", descriptor.properties.?[0].name.slice());
-    try std.testing.expectEqualStrings("Movement", descriptor.properties.?[0].category.slice());
+    try std.testing.expectEqual(@as(u32, 2), descriptor.inspector_entry_count);
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.category, descriptor.inspector_entries.?[0].kind);
+    try std.testing.expectEqualStrings("Movement", descriptor.inspector_entries.?[0].name.slice());
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.property, descriptor.inspector_entries.?[1].kind);
     try std.testing.expectEqual(@as(f64, 10), descriptor.properties.?[0].default_value.data.floating);
     try std.testing.expectEqualStrings("Node2D", descriptor.base_class.slice());
+}
+
+test "adapter emits ordered inspector metadata without changing property indexes" {
+    const descriptor = gd.ScriptAdapter(GroupedExportsScript).descriptor;
+    try std.testing.expectEqual(@as(u32, 3), descriptor.property_count);
+    try std.testing.expectEqualStrings("osc_amplitude", descriptor.properties.?[0].name.slice());
+    try std.testing.expectEqualStrings("osc_speed", descriptor.properties.?[1].name.slice());
+    try std.testing.expectEqualStrings("debug_text", descriptor.properties.?[2].name.slice());
+
+    try std.testing.expectEqual(@as(u32, 7), descriptor.inspector_entry_count);
+    const entries = descriptor.inspector_entries.?;
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.category, entries[0].kind);
+    try std.testing.expectEqualStrings("Movement", entries[0].name.slice());
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.group, entries[1].kind);
+    try std.testing.expectEqualStrings("Oscillation", entries[1].name.slice());
+    try std.testing.expectEqualStrings("osc_", entries[1].prefix.slice());
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.property, entries[2].kind);
+    try std.testing.expectEqual(@as(u32, 0), entries[2].property_index);
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.subgroup, entries[3].kind);
+    try std.testing.expectEqualStrings("Timing", entries[3].name.slice());
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.property, entries[4].kind);
+    try std.testing.expectEqual(@as(u32, 1), entries[4].property_index);
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.group, entries[5].kind);
+    try std.testing.expectEqualStrings("", entries[5].name.slice());
+    try std.testing.expectEqual(gd.abi.InspectorEntryKind.property, entries[6].kind);
+    try std.testing.expectEqual(@as(u32, 2), entries[6].property_index);
 }
 
 test "adapter reflects exported object classes" {
@@ -204,7 +256,7 @@ test "2D wrappers expose typed position methods" {
     try std.testing.expect(@hasDecl(gd.Sprite2D, "getPosition"));
 }
 
-test "ABI v4 layouts remain stable" {
+test "ABI v5 layouts remain stable" {
     try std.testing.expectEqual(@as(u32, 0), @intFromEnum(gd.abi.ValueType.nil));
     try std.testing.expectEqual(@as(u32, 1), @intFromEnum(gd.abi.ValueType.boolean));
     try std.testing.expectEqual(@as(u32, 2), @intFromEnum(gd.abi.ValueType.integer));
@@ -225,12 +277,13 @@ test "ABI v4 layouts remain stable" {
     try std.testing.expectEqual(@as(usize, 48), @sizeOf(gd.abi.ValueData));
     try std.testing.expectEqual(@as(usize, 56), @sizeOf(gd.abi.Value));
     try std.testing.expectEqual(@as(usize, 64), @sizeOf(gd.abi.EngineApi));
-    try std.testing.expectEqual(@as(usize, 152), @sizeOf(gd.abi.PropertyDescriptor));
-    try std.testing.expectEqual(@as(usize, 120), @sizeOf(gd.abi.ScriptDescriptor));
+    try std.testing.expectEqual(@as(usize, 136), @sizeOf(gd.abi.PropertyDescriptor));
+    try std.testing.expectEqual(@as(usize, 40), @sizeOf(gd.abi.InspectorEntryDescriptor));
+    try std.testing.expectEqual(@as(usize, 136), @sizeOf(gd.abi.ScriptDescriptor));
 
     try std.testing.expectEqual(@as(usize, 8), @alignOf(gd.abi.Value));
     try std.testing.expectEqual(@as(usize, 8), @offsetOf(gd.abi.Value, "data"));
-    try std.testing.expectEqual(@as(usize, 72), @offsetOf(gd.abi.ScriptDescriptor, "create_instance"));
+    try std.testing.expectEqual(@as(usize, 88), @offsetOf(gd.abi.ScriptDescriptor, "create_instance"));
 }
 
 test "shared codec supports objects and nullable objects" {
@@ -255,7 +308,7 @@ test "shared codec supports objects and nullable objects" {
     try std.testing.expectEqual(@as(?TestObject, null), decoded_nil);
 }
 
-test "shared codec round-trips ABI v3 value types" {
+test "shared codec round-trips ABI v5 value types" {
     const vector = gd.codec.toValue(gd.Vector(2, f64){ 3.0, 4.0 });
     try std.testing.expectEqual(gd.abi.ValueType.vector2, vector.type);
     const decoded_vector = try gd.codec.fromValue(gd.Vector(2, f64), &vector);
@@ -354,7 +407,7 @@ test "Node2D wrappers expose supported Godot 4.7 methods" {
     try std.testing.expect(@hasDecl(gd.Node2D, "setTransform"));
 }
 
-test "scene and UI wrappers expose selected ABI v3 methods" {
+test "scene and UI wrappers expose selected ABI v5 methods" {
     inline for (.{ gd.Node, gd.CanvasItem, gd.Control, gd.Node2D, gd.Sprite2D, gd.Node3D }) |Class| {
         try std.testing.expect(@hasDecl(Class, "getParent"));
         try std.testing.expect(@hasDecl(Class, "isInsideTree"));

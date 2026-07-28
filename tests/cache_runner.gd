@@ -3,15 +3,17 @@ extends SceneTree
 const FIXTURE_DIR := "res://.godot/gzscript/cache_test"
 const SCRIPT_PATH := FIXTURE_DIR + "/main.zig"
 const HELPER_PATH := FIXTURE_DIR + "/helper.zig"
+const EMBEDDED_PATH := FIXTURE_DIR + "/data.txt"
 
 const SCRIPT_SOURCE := """const gd = @import("godot");
 const helper = @import("helper.zig");
+const embedded_value: i64 = @intCast(@embedFile("data.txt")[0] - '0');
 
 pub const Base = gd.Node;
 const Self = @This();
 
 base: Base,
-value: i64 = helper.value,
+value: i64 = helper.value + embedded_value,
 
 pub const exports = .{ .value = gd.property(.{}) };
 
@@ -24,6 +26,7 @@ pub fn init(ctx: gd.InitContext) !Self {
 func _initialize() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(FIXTURE_DIR))
 	_write(HELPER_PATH, "pub const value: i64 = 1;\n")
+	_write(EMBEDDED_PATH, "1\n")
 	_write(SCRIPT_PATH, SCRIPT_SOURCE)
 	var worker := Thread.new()
 	worker.start(_compile_on_worker)
@@ -49,6 +52,12 @@ func _initialize() -> void:
 	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "fixture recompile failed"):
 		return
 	if not _require(_module_count() == after_initial + 1, "changing an imported Zig file reused a stale module"):
+		return
+
+	_write(EMBEDDED_PATH, "2\n")
+	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "embedded dependency recompile failed"):
+		return
+	if not _require(_module_count() == after_initial + 2, "changing an embedded non-Zig file reused a stale module"):
 		return
 
 	var script := load(SCRIPT_PATH) as Script
@@ -107,7 +116,8 @@ func _module_files() -> Array[String]:
 		return []
 	var result: Array[String] = []
 	for file in directory.get_files():
-		result.push_back(path.path_join(file))
+		if file.get_extension() in ["dll", "dylib", "so"]:
+			result.push_back(path.path_join(file))
 	return result
 
 
@@ -136,6 +146,8 @@ func _fail(message: String) -> void:
 
 
 func _cleanup() -> void:
-	for path in [SCRIPT_PATH, SCRIPT_PATH + ".uid", HELPER_PATH, HELPER_PATH + ".uid"]:
+	var paths := [SCRIPT_PATH, SCRIPT_PATH + ".uid", HELPER_PATH, HELPER_PATH + ".uid"]
+	paths.append_array([EMBEDDED_PATH, EMBEDDED_PATH + ".uid"])
+	for path in paths:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(FIXTURE_DIR))

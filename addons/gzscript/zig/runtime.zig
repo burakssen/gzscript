@@ -13,6 +13,8 @@ pub const Object = struct {
     owner: u64,
 
     pub fn call(self: Object, method: []const u8, arguments: []const abi.Value) !abi.Value {
+        // String payloads borrow engine storage until the next dynamic call.
+        // Object payloads are unowned IDs and must already be owned by Godot.
         const api = engine_api orelse return error.EngineNotReady;
         var result = abi.Value{};
         const status = api.object_call(self.owner, .from(method), if (arguments.len == 0) null else arguments.ptr, @intCast(arguments.len), &result);

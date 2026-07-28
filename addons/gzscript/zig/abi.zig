@@ -1,4 +1,4 @@
-pub const abi_version: u32 = 4;
+pub const abi_version: u32 = 5;
 
 pub const StringView = extern struct {
     ptr: [*]const u8,
@@ -106,12 +106,25 @@ pub const PropertyDescriptor = extern struct {
     type: ValueType,
     hint: PropertyHint,
     hint_string: StringView,
-    category: StringView,
     class_name: StringView,
     range_min: f64,
     range_max: f64,
     range_step: f64,
     default_value: Value,
+};
+
+pub const InspectorEntryKind = enum(u32) {
+    property = 0,
+    category = 1,
+    group = 2,
+    subgroup = 3,
+};
+
+pub const InspectorEntryDescriptor = extern struct {
+    kind: InspectorEntryKind,
+    property_index: u32 = 0,
+    name: StringView,
+    prefix: StringView,
 };
 
 pub const SignalArgumentDescriptor = extern struct {
@@ -147,6 +160,8 @@ pub const ScriptDescriptor = extern struct {
     method_count: u32,
     properties: ?[*]const PropertyDescriptor,
     property_count: u32,
+    inspector_entries: ?[*]const InspectorEntryDescriptor,
+    inspector_entry_count: u32,
     signals: ?[*]const SignalDescriptor,
     signal_count: u32,
     create_instance: *const fn (u64, *?*anyopaque) callconv(.c) Status,

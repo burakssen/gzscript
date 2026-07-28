@@ -111,7 +111,13 @@ func _module_count() -> int:
 	var platform := OS.get_name().to_lower()
 	var path := "res://.godot/gzscript/modules/%s-%s" % [platform, Engine.get_architecture_name()]
 	var directory := DirAccess.open(path)
-	return 0 if directory == null else directory.get_files().size()
+	if directory == null:
+		return 0
+	var count := 0
+	for file in directory.get_files():
+		if file.get_extension() in ["dll", "dylib", "so"]:
+			count += 1
+	return count
 
 
 func _source(value: int, run_id: int) -> String:

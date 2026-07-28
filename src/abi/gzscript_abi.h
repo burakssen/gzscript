@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define GZSCRIPT_ABI_VERSION 4u
+#define GZSCRIPT_ABI_VERSION 5u
 
 typedef struct {
   const char *ptr;
@@ -145,7 +145,6 @@ typedef struct {
   uint32_t type;
   uint32_t hint;
   GzStringView hint_string;
-  GzStringView category;
   GzStringView class_name;
   double range_min;
   double range_max;
@@ -154,11 +153,31 @@ typedef struct {
 } GzPropertyDescriptor;
 
 #ifdef __cplusplus
-static_assert(sizeof(GzPropertyDescriptor) == 152 &&
-                  alignof(GzPropertyDescriptor) == 8 &&
-                  offsetof(GzPropertyDescriptor, class_name) == 56 &&
-                  offsetof(GzPropertyDescriptor, default_value) == 96,
-              "Unexpected GzPropertyDescriptor ABI layout");
+static_assert(sizeof(GzPropertyDescriptor) == 136 &&
+                   alignof(GzPropertyDescriptor) == 8 &&
+                   offsetof(GzPropertyDescriptor, class_name) == 40 &&
+                   offsetof(GzPropertyDescriptor, default_value) == 80,
+               "Unexpected GzPropertyDescriptor ABI layout");
+#endif
+
+typedef enum {
+  GZ_INSPECTOR_ENTRY_PROPERTY = 0,
+  GZ_INSPECTOR_ENTRY_CATEGORY = 1,
+  GZ_INSPECTOR_ENTRY_GROUP = 2,
+  GZ_INSPECTOR_ENTRY_SUBGROUP = 3,
+} GzInspectorEntryKind;
+
+typedef struct {
+  uint32_t kind;
+  uint32_t property_index;
+  GzStringView name;
+  GzStringView prefix;
+} GzInspectorEntryDescriptor;
+
+#ifdef __cplusplus
+static_assert(sizeof(GzInspectorEntryDescriptor) == 40 &&
+                  alignof(GzInspectorEntryDescriptor) == 8,
+              "Unexpected GzInspectorEntryDescriptor ABI layout");
 #endif
 
 typedef struct {
@@ -216,6 +235,8 @@ typedef struct {
   uint32_t method_count;
   const GzPropertyDescriptor *properties;
   uint32_t property_count;
+  const GzInspectorEntryDescriptor *inspector_entries;
+  uint32_t inspector_entry_count;
   const GzSignalDescriptor *signals;
   uint32_t signal_count;
   GzCreateInstance create_instance;
@@ -227,10 +248,10 @@ typedef struct {
 } GzScriptDescriptor;
 
 #ifdef __cplusplus
-static_assert(sizeof(GzScriptDescriptor) == 120 &&
+static_assert(sizeof(GzScriptDescriptor) == 136 &&
                   alignof(GzScriptDescriptor) == 8 &&
                   offsetof(GzScriptDescriptor, base_class) == 8 &&
-                  offsetof(GzScriptDescriptor, create_instance) == 72,
+                  offsetof(GzScriptDescriptor, create_instance) == 88,
               "Unexpected GzScriptDescriptor ABI layout");
 #endif
 

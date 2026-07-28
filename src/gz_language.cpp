@@ -33,15 +33,20 @@ PackedStringArray GzLanguage::_get_reserved_words() const
 {
   PackedStringArray words;
   for (const char *word :
-       {"const", "var", "fn", "pub", "usingnamespace",
-        "struct", "enum", "union", "error", "opaque",
-        "defer", "errdefer", "unreachable", "async", "await",
-        "suspend", "resume", "cancel", "yield", "threadlocal",
-        "comptime", "inline", "noalias", "export", "extern",
-        "primitive", "align", "section", "callconv", "asm",
-        "volatile", "test", "anytype", "anyframe", "if",
-        "else", "switch", "while", "for", "break",
-        "continue", "return", "try", "catch"})
+       {"addrspace", "align", "allowzero", "and", "anyframe", "anytype",
+        "asm", "async", "await", "break", "callconv", "catch", "comptime",
+        "const", "continue", "defer", "else", "enum", "errdefer", "error",
+        "export", "extern", "fn", "for", "if", "inline", "linksection",
+        "noalias", "noinline", "nosuspend", "opaque", "or", "orelse",
+        "packed", "pub", "resume", "return", "struct", "suspend", "switch",
+        "test", "threadlocal", "try", "union", "unreachable",
+        "usingnamespace", "var", "volatile", "while", "false", "null",
+        "true", "undefined", "anyerror", "anyopaque", "bool", "c_char",
+        "c_int", "c_long", "c_longdouble", "c_longlong", "c_short", "c_uint",
+        "c_ulong", "c_ulonglong", "c_ushort", "comptime_float",
+        "comptime_int", "f16", "f32", "f64", "f128", "i8", "i16", "i32",
+        "i64", "isize", "noreturn", "type", "u8", "u16", "u32", "u64",
+        "usize", "void"})
     words.push_back(word);
   return words;
 }

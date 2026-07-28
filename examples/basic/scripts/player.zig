@@ -8,15 +8,17 @@ time_passed: f64 = 0.0,
 amplitude: f64 = 10.0,
 speed: f64 = 1.0,
 
-pub const exports = .{
-    .amplitude = gd.property(.{
-        .category = "Movement",
+pub const exports = gd.exports(.{
+    gd.category("Movement"),
+    gd.group("Oscillation", ""),
+    gd.field("amplitude", gd.property(.{
         .range = .{ .min = 0.0, .max = 100.0, .step = 0.1 },
-    }),
-    .speed = gd.property(.{
+    })),
+    gd.subgroup("Timing", ""),
+    gd.field("speed", gd.property(.{
         .range = .{ .min = 0.0, .max = 20.0, .step = 0.1 },
-    }),
-};
+    })),
+});
 
 pub const signals = .{
     .zig_ready = gd.signal(.{}),

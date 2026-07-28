@@ -4,7 +4,9 @@
 #include "gz_language.hpp"
 #include "gz_value_codec.hpp"
 
+#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/object.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/wrapped.hpp>
 #include <godot_cpp/core/gdextension_interface_loader.hpp>
 #include <godot_cpp/core/memory.hpp>
@@ -43,51 +45,10 @@ namespace
     return result;
   }
 
-  void append_properties(List<PropertyInfo> &result,
-                         const GzScriptDescriptor *descriptor)
-  {
-    String current_category;
-    for (uint32_t i = 0; i < descriptor->property_count; ++i)
-    {
-      const GzPropertyDescriptor &property = descriptor->properties[i];
-      String category = gzscript::from_view(property.category);
-      if (!category.is_empty() && category != current_category)
-      {
-        result.push_back(
-            PropertyInfo(Variant::NIL, StringName(category),
-                         PROPERTY_HINT_NONE, "", PROPERTY_USAGE_CATEGORY));
-        current_category = category;
-      }
-      PropertyHint godot_hint = static_cast<PropertyHint>(property.hint);
-      String hint_str;
-      if (godot_hint == PROPERTY_HINT_RANGE)
-      {
-        hint_str = String::num(property.range_min) + "," +
-                   String::num(property.range_max) + "," +
-                   String::num(property.range_step);
-      }
-      else
-      {
-        hint_str = gzscript::from_view(property.hint_string);
-      }
-      result.push_back(PropertyInfo(
-          gzscript::variant_type(property.type),
-          StringName(gzscript::from_view(property.name)),
-          godot_hint, hint_str, PROPERTY_USAGE_DEFAULT,
-          StringName(gzscript::from_view(property.class_name))));
-    }
-  }
-
-  // Property names are cached when the module loads.
+  // Property names and indices are cached when the module loads.
   int property_index(InstanceData *data, const StringName &name)
   {
-    const auto &prop_names = data->module->get_property_names();
-    for (size_t i = 0; i < prop_names.size(); ++i)
-    {
-      if (prop_names[i] == name)
-        return static_cast<int>(i);
-    }
-    return -1;
+    return data->module->find_property(name);
   }
 
   void sync_retained_objects(InstanceData *data)
@@ -122,6 +83,45 @@ namespace
       }
       data->retained_objects[i] = object;
     }
+  }
+
+  bool migrate_editor_instance(
+      InstanceData *data, const std::shared_ptr<GzCompiledModule> &next_module)
+  {
+    const GzScriptDescriptor *current = data->module->get_descriptor();
+    const GzScriptDescriptor *next = next_module->get_descriptor();
+    void *next_instance = nullptr;
+    if (next->create_instance(data->owner->get_instance_id(), &next_instance) !=
+        GZ_STATUS_OK)
+      return false;
+
+    for (uint32_t i = 0; i < current->property_count; ++i)
+    {
+      const int32_t next_index = next_module->find_property(
+          StringName(gzscript::from_view(current->properties[i].name)));
+      if (next_index < 0 || current->properties[i].type !=
+                                next->properties[next_index].type)
+        continue;
+      GzValue value{};
+      if (current->get_property(data->zig_instance, i, &value) != GZ_STATUS_OK ||
+          next->set_property(next_instance, next_index, &value) != GZ_STATUS_OK)
+      {
+        next->destroy_instance(next_instance);
+        return false;
+      }
+    }
+
+    std::shared_ptr<GzCompiledModule> previous_module = data->module;
+    void *previous_instance = data->zig_instance;
+    // Keep old RefCounted exports alive until the new retention set is built.
+    std::vector<Variant> previous_retained =
+        std::move(data->retained_objects);
+    data->module = next_module;
+    data->zig_instance = next_instance;
+    data->retained_objects.resize(next->property_count);
+    sync_retained_objects(data);
+    previous_module->get_descriptor()->destroy_instance(previous_instance);
+    return true;
   }
 
   GDExtensionBool instance_set(void *pointer, GDExtensionConstStringNamePtr name,
@@ -175,14 +175,17 @@ namespace
                                                             uint32_t *count)
   {
     auto *data = static_cast<InstanceData *>(pointer);
-    auto *properties = memnew(List<PropertyInfo>);
-    append_properties(*properties, data->module->get_descriptor());
-    if (properties->is_empty())
+    const auto &cached = data->module->get_inspector_properties();
+    if (cached.empty())
     {
-      memdelete(properties);
       *count = 0;
       return nullptr;
     }
+
+    auto *properties = memnew(List<PropertyInfo>);
+    for (const PropertyInfo &property : cached)
+      properties->push_back(property);
+
     return internal::create_c_property_list(properties, count);
   }
   void instance_free_property_list(void *, const GDExtensionPropertyInfo *list,
@@ -191,16 +194,25 @@ namespace
     if (list)
       internal::free_c_property_list(const_cast<GDExtensionPropertyInfo *>(list));
   }
-  GDExtensionBool instance_property_can_revert(void *,
-                                               GDExtensionConstStringNamePtr)
+  GDExtensionBool instance_property_can_revert(
+      void *pointer, GDExtensionConstStringNamePtr name)
   {
-    return false;
+    auto *data = static_cast<InstanceData *>(pointer);
+    return property_index(data, *reinterpret_cast<const StringName *>(name)) >= 0;
   }
-  GDExtensionBool instance_property_get_revert(void *,
-                                               GDExtensionConstStringNamePtr,
-                                               GDExtensionVariantPtr)
+  GDExtensionBool instance_property_get_revert(
+      void *pointer, GDExtensionConstStringNamePtr name,
+      GDExtensionVariantPtr result)
   {
-    return false;
+    auto *data = static_cast<InstanceData *>(pointer);
+    const StringName &property_name =
+        *reinterpret_cast<const StringName *>(name);
+    if (property_index(data, property_name) < 0)
+      return false;
+
+    *reinterpret_cast<Variant *>(result) =
+        data->module->get_property_defaults().get(property_name, Variant());
+    return true;
   }
   GDExtensionObjectPtr instance_get_owner(void *pointer)
   {
@@ -376,9 +388,162 @@ namespace
   };
 } // namespace
 
-void GzScript::_bind_methods() {}
-GzScript::GzScript() { scripts.insert(this); }
-GzScript::~GzScript() { scripts.erase(this); }
+void GzScript::_bind_methods()
+{
+  ClassDB::bind_method(D_METHOD("_apply_pending_refresh"),
+                       &GzScript::_apply_pending_refresh);
+}
+
+GzScript::GzScript()
+{
+  scripts.insert(this);
+}
+
+GzScript::~GzScript()
+{
+  pending_refresh = false;
+  pending_module.reset();
+  scripts.erase(this);
+}
+
+void GzScript::_schedule_pending_refresh()
+{
+  if (refresh_call_scheduled || !pending_refresh || !pending_module)
+    return;
+
+  refresh_call_scheduled = true;
+  call_deferred("_apply_pending_refresh");
+}
+
+void GzScript::publish_module(std::shared_ptr<GzCompiledModule> next_module)
+{
+  if (!next_module)
+    return;
+
+  const bool exports_changed =
+      !module || !module->has_same_exports(*next_module);
+
+  if (!Engine::get_singleton()->is_editor_hint())
+  {
+    module = std::move(next_module);
+    valid = true;
+
+    if (exports_changed)
+      _update_exports();
+    else
+      emit_changed();
+    return;
+  }
+
+  // Publish the script-level module and its cached export metadata immediately.
+  // Existing InstanceData objects retain their own shared_ptr to the old module
+  // until their state migration succeeds.
+  pending_module = next_module;
+  module = std::move(next_module);
+  valid = true;
+
+  if (exports_changed)
+    _update_exports();
+  else
+    emit_changed();
+
+  // A newer reload replaces any older pending migration. Snapshot the currently
+  // live instances and migrate only those not already using the new module.
+  pending_refresh_instances.clear();
+  pending_refresh_instances.reserve(instances.size());
+  for (void *instance : instances)
+  {
+    auto *data = static_cast<InstanceData *>(instance);
+    if (data->module != pending_module)
+      pending_refresh_instances.push_back(instance);
+  }
+
+  refresh_index = 0;
+  pending_exports_changed = exports_changed;
+  pending_refresh = !pending_refresh_instances.empty();
+
+  if (!pending_refresh)
+  {
+    pending_module.reset();
+    pending_exports_changed = false;
+    return;
+  }
+
+  _schedule_pending_refresh();
+}
+
+void GzScript::_refresh_editor_instances(
+    std::shared_ptr<GzCompiledModule> next_module)
+{
+  publish_module(std::move(next_module));
+}
+
+void GzScript::_apply_pending_refresh()
+{
+  // This invocation has now consumed the scheduled callback. A new callback is
+  // scheduled below only when more work remains.
+  refresh_call_scheduled = false;
+
+  if (!pending_refresh || !pending_module)
+    return;
+
+  constexpr uint64_t TIME_BUDGET_USEC = 2000;
+  constexpr std::size_t MIN_BATCH = 8;
+
+  const uint64_t started_at = Time::get_singleton()->get_ticks_usec();
+  std::size_t processed = 0;
+
+  while (refresh_index < pending_refresh_instances.size())
+  {
+    void *instance = pending_refresh_instances[refresh_index++];
+
+    // An instance may have been destroyed after the snapshot was taken.
+    if (instances.find(instance) == instances.end())
+      continue;
+
+    auto *data = static_cast<InstanceData *>(instance);
+
+    // A newer instance or an earlier pass may already use the latest module.
+    if (data->module == pending_module)
+      continue;
+
+    Object *owner = data->owner;
+    if (migrate_editor_instance(data, pending_module))
+    {
+      // Only a changed property schema requires an Object-side property-list
+      // invalidation. Notify immediately so no raw owner pointer is retained
+      // across deferred frames.
+      if (pending_exports_changed && owner)
+        owner->notify_property_list_changed();
+    }
+    else
+    {
+      UtilityFunctions::printerr(
+          "gzscript: failed to refresh editor instance for ", get_path());
+    }
+
+    ++processed;
+    if (processed >= MIN_BATCH &&
+        Time::get_singleton()->get_ticks_usec() - started_at >=
+            TIME_BUDGET_USEC)
+    {
+      break;
+    }
+  }
+
+  if (refresh_index < pending_refresh_instances.size())
+  {
+    _schedule_pending_refresh();
+    return;
+  }
+
+  pending_refresh = false;
+  pending_exports_changed = false;
+  pending_module.reset();
+  pending_refresh_instances.clear();
+  refresh_index = 0;
+}
+
 bool GzScript::_editor_can_reload_from_file() { return true; }
 bool GzScript::_can_instantiate() const { return valid && module != nullptr; }
 Ref<Script> GzScript::_get_base_script() const { return {}; }
@@ -415,12 +580,17 @@ void *GzScript::_instance_create(Object *owner) const
 
 void *GzScript::_placeholder_instance_create(Object *owner) const
 {
+  if (!owner)
+    return nullptr;
+
   void *placeholder = gdextension_interface::placeholder_script_instance_create(
       GzLanguage::get_singleton()->_owner, const_cast<GzScript *>(this)->_owner,
       owner->_owner);
   GzScript *script = const_cast<GzScript *>(this);
   script->placeholders.insert(placeholder);
-  script->_update_exports();
+
+  // Creating one placeholder must not update every existing placeholder.
+  script->_update_placeholder(placeholder);
   return placeholder;
 }
 
@@ -446,9 +616,8 @@ Error GzScript::_reload(bool keep_state)
     return ERR_COMPILATION_FAILED;
   }
 
-  module = std::move(next);
-  valid = true;
-  _update_exports();
+  publish_module(std::move(next));
+  GzBuildManager::get_singleton()->emit_signal("script_compiled");
   return OK;
 }
 
@@ -517,13 +686,7 @@ TypedArray<Dictionary> GzScript::_get_script_signal_list() const
 
 bool GzScript::_has_property_default_value(const StringName &property) const
 {
-  if (!module)
-    return false;
-  for (uint32_t i = 0; i < module->get_descriptor()->property_count; ++i)
-    if (StringName(gzscript::from_view(
-            module->get_descriptor()->properties[i].name)) == property)
-      return true;
-  return false;
+  return module && module->find_property(property) >= 0;
 }
 
 Variant
@@ -531,31 +694,33 @@ GzScript::_get_property_default_value(const StringName &property) const
 {
   if (!module)
     return Variant();
-  for (uint32_t i = 0; i < module->get_descriptor()->property_count; ++i)
-    if (StringName(gzscript::from_view(
-            module->get_descriptor()->properties[i].name)) == property)
-      return gzscript::to_variant(
-          module->get_descriptor()->properties[i].default_value);
-  return Variant();
+
+  return module->get_property_defaults().get(property, Variant());
+}
+
+void GzScript::_update_placeholder(void *placeholder) const
+{
+  if (!placeholder || !module)
+    return;
+
+  // TypedArray and Dictionary copies are copy-on-write. Keeping local mutable
+  // handles avoids relying on const _native_ptr() overloads across godot-cpp
+  // versions while retaining the cached backing data.
+  TypedArray<Dictionary> properties = module->get_script_property_list();
+  Dictionary defaults = module->get_property_defaults();
+
+  gdextension_interface::placeholder_script_instance_update(
+      placeholder, properties._native_ptr(), defaults._native_ptr());
 }
 
 void GzScript::_update_exports()
 {
-  TypedArray<Dictionary> properties = _get_script_property_list();
-  Dictionary defaults;
   if (module)
   {
-    const GzScriptDescriptor *descriptor = module->get_descriptor();
-    for (uint32_t i = 0; i < descriptor->property_count; ++i)
-    {
-      const GzPropertyDescriptor &property = descriptor->properties[i];
-      defaults[StringName(gzscript::from_view(property.name))] =
-          gzscript::to_variant(property.default_value);
-    }
+    for (void *placeholder : placeholders)
+      _update_placeholder(placeholder);
   }
-  for (void *placeholder : placeholders)
-    gdextension_interface::placeholder_script_instance_update(
-        placeholder, properties._native_ptr(), defaults._native_ptr());
+
   emit_changed();
 }
 
@@ -573,14 +738,8 @@ TypedArray<Dictionary> GzScript::_get_script_method_list() const
 
 TypedArray<Dictionary> GzScript::_get_script_property_list() const
 {
-  TypedArray<Dictionary> result;
-  if (!module)
-    return result;
-  List<PropertyInfo> properties;
-  append_properties(properties, module->get_descriptor());
-  for (const PropertyInfo &property : properties)
-    result.push_back(Dictionary(property));
-  return result;
+  return module ? module->get_script_property_list()
+                : TypedArray<Dictionary>();
 }
 
 int32_t GzScript::_get_member_line(const StringName &) const { return -1; }

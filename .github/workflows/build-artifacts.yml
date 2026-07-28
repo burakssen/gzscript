@@ -147,8 +147,11 @@ jobs:
       - name: Prepare package
         run: |
           mkdir -p dist/gzscript/addons
-          cp README.md dist/gzscript/
+          cp LICENSE README.md dist/gzscript/
           cp -R addons/gzscript dist/gzscript/addons/
+          rm -f \
+            dist/gzscript/addons/gzscript/zig/class_support_test.zig \
+            dist/gzscript/addons/gzscript/zig/class_support_test.zig.uid
           mkdir -p dist/gzscript/addons/gzscript/bin
 
       - name: Download all platform binaries
@@ -160,6 +163,12 @@ jobs:
 
       - name: Verify package contents
         run: |
+          expected_root="$(printf '%s\n' LICENSE README.md addons | sort)"
+          actual_root="$(find dist/gzscript -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)"
+          test "$actual_root" = "$expected_root"
+
+          test -f dist/gzscript/LICENSE
+          test -f dist/gzscript/README.md
           test -f dist/gzscript/addons/gzscript/bin/libgzscript.macos.template_debug.x86_64.framework/libgzscript.macos.template_debug.x86_64
           test -f dist/gzscript/addons/gzscript/bin/libgzscript.macos.template_release.x86_64.framework/libgzscript.macos.template_release.x86_64
           test -f dist/gzscript/addons/gzscript/bin/libgzscript.macos.template_debug.arm64.framework/libgzscript.macos.template_debug.arm64
@@ -174,11 +183,28 @@ jobs:
           test -f dist/gzscript/addons/gzscript/bin/libgzscript.windows.template_release.arm64.dll
           test -f dist/gzscript/addons/gzscript/gzscript.gdextension
           test -f dist/gzscript/addons/gzscript/zig/godot.zig
+          test ! -e dist/gzscript/addons/gzscript/zig/class_support_test.zig
+          test ! -e dist/gzscript/addons/gzscript/zig/class_support_test.zig.uid
+
+      - name: Archive package and generate checksum
+        run: |
+          tar -czf dist/gzscript-desktop.tar.gz -C dist gzscript
+          cd dist
+          sha256sum gzscript-desktop.tar.gz > gzscript-desktop.tar.gz.sha256
+          sha256sum -c gzscript-desktop.tar.gz.sha256
+
+          tar -tzf gzscript-desktop.tar.gz gzscript/LICENSE > /dev/null
+          if tar -tzf gzscript-desktop.tar.gz | grep -q 'class_support_test\.zig'; then
+            echo "Development-only class support test found in release archive" >&2
+            exit 1
+          fi
 
       - name: Upload combined desktop artifact
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: gzscript-desktop
-          path: dist/gzscript/
+          path: |
+            dist/gzscript-desktop.tar.gz
+            dist/gzscript-desktop.tar.gz.sha256
           if-no-files-found: error
           retention-days: 14

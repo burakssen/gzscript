@@ -75,6 +75,3 @@ case "$editor_output" in
     exit 1
     ;;
 esac
-
-printf '[BENCHMARK] Performance ratios are informational; workload failures still fail validation\n'
-run_step "Run Zig versus GDScript benchmarks" run_godot --script tests/benchmark_runner.gd

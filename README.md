@@ -54,14 +54,14 @@ Settings > Gzscript > Compiler > Optimization** to `ReleaseSafe`,
 `ReleaseFast`, or `ReleaseSmall` when measuring runtime performance. The
 optimization mode is part of the module cache identity.
 
-The cache identity includes the script path and source, every `.zig` file below
-the script's directory, the complete bundled Zig SDK and generated bindings,
-the ABI and adapter versions, the selected Zig executable and reported version,
-the platform, architecture, and optimization mode. This conservative policy may
-recompile when an unrelated Zig file in the same directory changes, but it does
-not reuse a module after a relative import changes. In-memory source must be
-saved before compilation so the cache identity cannot differ from the file Zig
-actually compiles.
+The cache identity includes the script path and source, every regular source or
+embedded-data file below the script's directory, the complete bundled Zig SDK
+and generated bindings, the ABI and adapter versions, the selected Zig
+executable and reported version, the platform, architecture, and optimization
+mode. This conservative policy may recompile when an unrelated file in the same
+directory changes, but it does not reuse a module after a relative import or
+`@embedFile` input changes. In-memory source must be saved before compilation so
+the cache identity cannot differ from the file Zig actually compiles.
 
 ## Script API
 
@@ -76,15 +76,17 @@ time_passed: f64 = 0.0,
 amplitude: f64 = 10.0,
 speed: f64 = 1.0,
 
-pub const exports = .{
-    .amplitude = gd.property(.{
-        .category = "Movement",
+pub const exports = gd.exports(.{
+    gd.category("Movement"),
+    gd.group("Oscillation", ""),
+    gd.field("amplitude", gd.property(.{
         .range = .{ .min = 0.0, .max = 100.0, .step = 0.1 },
-    }),
-    .speed = gd.property(.{
+    })),
+    gd.subgroup("Timing", ""),
+    gd.field("speed", gd.property(.{
         .range = .{ .min = 0.0, .max = 20.0, .step = 0.1 },
-    }),
-};
+    })),
+});
 
 pub fn init(ctx: gd.InitContext) !Self {
     return .{ .base = .{ .owner = ctx.owner } };
@@ -100,7 +102,18 @@ pub fn process(self: *Self, delta: f64) !void {
 }
 ```
 
-Only fields listed in `exports` are visible to Godot. Exported fields must have defaults. The MVP supports `bool`, integer types, `f32`, `f64`, `[]const u8`, `gd.Vector(2, T)`, `gd.Vector(3, T)`, `gd.Color`, `gd.Transform2D`, `gd.Transform3D`, `gd.Rect2`, enums, and Godot object wrappers. Script templates are generated for the selected Godot base class.
+Only fields listed with `gd.field` are visible to Godot. Exported fields must have declaration defaults. `gd.category`, `gd.group`, and `gd.subgroup` organize the following fields in declaration order. Group and subgroup prefixes follow Godot's rules: matching prefixes are removed from displayed property names. Use `gd.endGroup()` before the next field to return to the ungrouped Inspector section. Groups cannot be nested, and a subgroup requires an active group; invalid layouts fail at compile time.
+
+The previous named form remains supported for source compatibility:
+
+```zig
+pub const exports = .{
+    .amplitude = gd.property(.{ .category = "Movement" }),
+    .speed = gd.property(.{}),
+};
+```
+
+New scripts should prefer the ordered form because it makes category and group boundaries explicit. Property options reject unknown names, invalid ranges, and conflicting range hints. The MVP supports `bool`, `i8` through `i64`, `u8` through `u32`, `f32`, `f64`, `[]const u8`, `gd.Vector(2, T)`, `gd.Vector(3, T)`, `gd.Color`, `gd.Transform2D`, `gd.Transform3D`, `gd.Rect2`, enums, and Godot object wrappers. Script templates are generated for the selected Godot base class.
 
 Signals use named, typed arguments and are emitted through the base object:
 
@@ -114,7 +127,7 @@ try self.base.emitSignal("started", .{});
 try self.base.emitSignal("position_changed", .{position});
 ```
 
-Generated wrappers cover the reviewed `Node`, `CanvasItem`, `Control`, `Node2D`, `Sprite2D`, and `Node3D` APIs supported by ABI v4, including transforms, drawing, colors, rectangles, visibility, hierarchy, and object-returning methods. Object exports retain `RefCounted` values and reject incompatible Godot classes. Use `gd.Object.call` as the fallback for methods outside that generated surface. Dynamic calls report missing methods and invalid arguments as Zig errors. Export additions and removals refresh the selected node's Inspector after a successful save.
+Generated wrappers cover the reviewed `Node`, `CanvasItem`, `Control`, `Node2D`, `Sprite2D`, and `Node3D` APIs supported by ABI v5, including transforms, drawing, colors, rectangles, visibility, hierarchy, and object-returning methods. Object exports retain `RefCounted` values and reject incompatible Godot classes. Use `gd.Object.call` as the fallback for methods outside that generated surface. Dynamic calls report missing methods and invalid arguments as Zig errors. Export additions, removals, categories, and groups refresh the selected node's Inspector after a successful save.
 
 The typed wrappers are generated from the pinned Godot API metadata and checked into the addon:
 
@@ -145,18 +158,22 @@ GZSCRIPT_ZIG_PATH="$(command -v zig)" \
 ## Reload contract
 
 A successful reload publishes the new module for future instances and refreshes
-editor metadata. Existing instances keep the exact module and Zig-owned state
-with which they were created. A failed reload does not replace that module, so
-existing instances remain safe, but the script is marked invalid and cannot
-create new instances until a later successful reload. `keep_state` does not
-currently migrate private or exported state between module versions. While an
-asynchronous save is pending, the last accepted module remains active.
+editor metadata. Runtime instances keep the exact module and Zig-owned state
+with which they were created. Editor instances are recreated against the new
+module so Inspector exports update immediately; name/type-compatible exports
+are preserved, while private Zig state is reset. A failed reload does not
+replace the accepted module or active instances. `keep_state` does not migrate
+runtime state between module versions. While an asynchronous save is pending,
+the last accepted module remains active.
 
 ## MVP limitations
 
 - Packaged project exports are not implemented yet; development currently requires loose source files and a local Zig compiler.
 - Threaded `ResourceLoader` requests for Zig scripts are rejected; initial loads must run on the main thread.
 - Active instances are not migrated after recompilation; see the reload contract above.
+- Only the listed Godot virtual callbacks are callable; arbitrary public Zig methods, static methods, RPC metadata, tool scripts, inheritance, and global script classes are not implemented yet.
+- Editor validation, completion, symbol lookup, debugger stacks, and profiling integration are not implemented yet. Compilation diagnostics are reported when a resource is loaded, saved, or Run is requested.
+- Strings returned by raw `gd.Object.call` borrow engine storage until the next dynamic call on the same thread. Returned object wrappers are unowned IDs and are safe only while Godot or another owner retains the object.
 - Zig callbacks map `ready`, `enterTree`, `exitTree`, `process`, `physicsProcess`, `input`, `unhandledInput`, `shortcutInput`, `unhandledKeyInput`, `guiInput`, and `draw` to their Godot virtual methods. An optional `notification` method receives other Godot notifications by number.
-- Generated typed methods are limited to the ABI v4 scalar, typed object ID, string-input, vector, color, transform, rectangle, and enum type matrix.
+- Generated typed methods are limited to the ABI v5 scalar, typed object ID, string-input, vector, color, transform, rectangle, and enum type matrix.
 - Arrays, dictionaries, packed arrays, `Callable`, and general `Variant` values are not yet supported by the typed ABI.
