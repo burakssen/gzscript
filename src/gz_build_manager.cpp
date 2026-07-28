@@ -419,10 +419,13 @@ GzBuildManager::~GzBuildManager()
   if (active)
   {
     gz_terminate_process_tree(active->pid);
-    while (OS::get_singleton()->is_process_running(active->pid))
+    if (OS *os = OS::get_singleton())
     {
-      gz_terminate_process_tree(active->pid);
-      OS::get_singleton()->delay_msec(1);
+      while (os->is_process_running(active->pid))
+      {
+        gz_terminate_process_tree(active->pid);
+        os->delay_msec(1);
+      }
     }
     DirAccess::remove_absolute(active->plan.compile_output);
     DirAccess::remove_absolute(active->plan.generated);

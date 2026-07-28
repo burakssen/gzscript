@@ -120,8 +120,11 @@ GzLspClient::GzLspClient(GzLanguage *owner) : language(owner)
 
 GzLspClient::~GzLspClient()
 {
-  if (pid > 0 && OS::get_singleton()->is_process_running(pid))
-    OS::get_singleton()->kill(pid);
+  if (OS *os = OS::get_singleton())
+  {
+    if (pid > 0 && os->is_process_running(pid))
+      os->kill(pid);
+  }
   if (stdio_pipe.is_valid())
     stdio_pipe->close();
   if (stderr_pipe.is_valid())
@@ -275,8 +278,11 @@ void GzLspClient::fail(const String &message)
   has_pending_definition = false;
   requests.clear();
   documents.clear();
-  if (pid > 0 && OS::get_singleton()->is_process_running(pid))
-    OS::get_singleton()->kill(pid);
+  if (OS *os = OS::get_singleton())
+  {
+    if (pid > 0 && os->is_process_running(pid))
+      os->kill(pid);
+  }
   pid = -1;
   if (stdio_pipe.is_valid())
     stdio_pipe->close();

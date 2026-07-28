@@ -109,7 +109,10 @@ bool GzFileLock::lock(const String &path, uint64_t timeout_msec)
       last_error = "Timed out waiting for lock " + path;
       return false;
     }
-    OS::get_singleton()->delay_msec(2);
+    if (OS *os = OS::get_singleton())
+      os->delay_msec(2);
+    else
+      return false;
   }
 }
 

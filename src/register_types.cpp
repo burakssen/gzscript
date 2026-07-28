@@ -57,18 +57,27 @@ void uninitialize_gzscript_module(ModuleInitializationLevel level) {
     return;
   }
 
-  ResourceSaver::get_singleton()->remove_resource_format_saver(resource_saver);
-  ResourceLoader::get_singleton()->remove_resource_format_loader(
-      resource_loader);
+  if (ResourceSaver *rs = ResourceSaver::get_singleton()) {
+    rs->remove_resource_format_saver(resource_saver);
+  }
+  if (ResourceLoader *rl = ResourceLoader::get_singleton()) {
+    rl->remove_resource_format_loader(resource_loader);
+  }
   resource_saver.unref();
   resource_loader.unref();
 
-  Engine::get_singleton()->unregister_script_language(language);
-  Engine::get_singleton()->unregister_singleton("GzBuildManager");
-  memdelete(language);
-  memdelete(build_manager);
-  language = nullptr;
-  build_manager = nullptr;
+  if (Engine *engine = Engine::get_singleton()) {
+    engine->unregister_script_language(language);
+    engine->unregister_singleton("GzBuildManager");
+  }
+  if (language) {
+    memdelete(language);
+    language = nullptr;
+  }
+  if (build_manager) {
+    memdelete(build_manager);
+    build_manager = nullptr;
+  }
 }
 
 extern "C" {
