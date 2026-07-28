@@ -36,8 +36,9 @@ func _enter_tree() -> void:
 			if fs != null:
 				fs.filesystem_changed.connect(_queue_rebuild)
 
-	if GzBuildManager != null:
-		GzBuildManager.script_compiled.connect(_queue_inspector_refresh)
+	var bm = _get_build_manager()
+	if bm != null:
+		bm.script_compiled.connect(_queue_inspector_refresh)
 
 
 func _exit_tree() -> void:
@@ -58,8 +59,15 @@ func _exit_tree() -> void:
 			if fs != null and fs.filesystem_changed.is_connected(_queue_rebuild):
 				fs.filesystem_changed.disconnect(_queue_rebuild)
 
-	if GzBuildManager != null and GzBuildManager.script_compiled.is_connected(_queue_inspector_refresh):
-		GzBuildManager.script_compiled.disconnect(_queue_inspector_refresh)
+	var bm = _get_build_manager()
+	if bm != null and bm.script_compiled.is_connected(_queue_inspector_refresh):
+		bm.script_compiled.disconnect(_queue_inspector_refresh)
+
+
+func _get_build_manager():
+	if Engine.has_singleton("GzBuildManager"):
+		return Engine.get_singleton("GzBuildManager")
+	return null
 
 
 func _get_script_editor() -> ScriptEditor:
@@ -132,11 +140,16 @@ func _refresh_inspector() -> void:
 
 
 func _rebuild_loaded_scripts() -> void:
-	GzBuildManager.queue_all()
+	var bm = _get_build_manager()
+	if bm != null:
+		bm.queue_all()
 
 
 func _build() -> bool:
-	var success := GzBuildManager.compile_all()
-	if not success:
-		push_error(GzBuildManager.get_last_diagnostics())
-	return success
+	var bm = _get_build_manager()
+	if bm != null:
+		var success := bm.compile_all()
+		if not success:
+			push_error(bm.get_last_diagnostics())
+		return success
+	return true

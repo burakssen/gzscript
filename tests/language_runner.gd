@@ -142,7 +142,8 @@ func _open_zig_script() -> void:
 	sprite.connect(&"property_list_changed", inspector_callback)
 	if not compilation_succeeded:
 		return
-	GzBuildManager.emit_signal(&"script_compiled")
+	if Engine.has_singleton("GzBuildManager"):
+		Engine.get_singleton("GzBuildManager").emit_signal(&"script_compiled")
 	var export_names: Array[StringName] = []
 	var marker_names: Array[StringName] = []
 	for property in sprite.get_property_list():
