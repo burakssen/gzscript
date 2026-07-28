@@ -140,9 +140,6 @@ func _run() -> void:
 		quit(1)
 		return
 
-	script.take_over_path("")
-	invalid_script.take_over_path("")
-	moved_while_queued.take_over_path("")
 	_cleanup()
 	print("GZSCRIPT_SAVE_OK")
 	quit()

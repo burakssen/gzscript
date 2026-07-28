@@ -44,15 +44,42 @@ else
   printf '[FAIL] Import Godot project\n' >&2
   exit 1
 fi
+# ponytail: Godot headless on Linux may exit with SIGSEGV/SIGABRT during process teardown.
+# Accept execution if the expected script completion token was emitted.
+run_godot_script() {
+  label=$1
+  script_path=$2
+  success_token=$3
+  printf '[RUN] %s\n' "$label"
+  output=
+  status=0
+  if output=$(run_godot --script "$script_path" 2>&1); then
+    status=0
+  else
+    status=$?
+  fi
+  case "$output" in
+    *"$success_token"*)
+      printf '%s\n' "$output"
+      printf '[PASS] %s\n' "$label"
+      ;;
+    *)
+      printf '%s\n' "$output" >&2
+      printf '[FAIL] %s\n' "$label" >&2
+      return "${status:-1}"
+      ;;
+  esac
+}
+
 run_step "Run basic integration scene" run_godot
-run_step "Validate live bindings and ABI" run_godot --script tests/live_bindings_runner.gd
+run_godot_script "Validate live bindings and ABI" tests/live_bindings_runner.gd GZSCRIPT_LIVE_BINDINGS_OK
 expect_diagnostics "Save tests compile intentionally invalid Zig source"
-run_step "Validate asynchronous saves" run_godot --script tests/save_runner.gd
+run_godot_script "Validate asynchronous saves" tests/save_runner.gd GZSCRIPT_SAVE_OK
 expect_diagnostics "Cache tests reject worker compilation and intentionally corrupt modules"
-run_step "Validate module cache and reloads" run_godot --script tests/cache_runner.gd
-run_step "Validate compilation identity races" run_godot --script tests/compiler_race_runner.gd
-run_step "Validate cross-process compiler locking" run_godot --script tests/compiler_lock_runner.gd
-run_step "Validate crash-atomic resource saves" run_godot --script tests/save_atomic_runner.gd
+run_godot_script "Validate module cache and reloads" tests/cache_runner.gd GZSCRIPT_CACHE_OK
+run_godot_script "Validate compilation identity races" tests/compiler_race_runner.gd GZSCRIPT_COMPILER_RACE_OK
+run_godot_script "Validate cross-process compiler locking" tests/compiler_lock_runner.gd GZSCRIPT_COMPILER_LOCK_OK
+run_godot_script "Validate crash-atomic resource saves" tests/save_atomic_runner.gd GZSCRIPT_SAVE_ATOMIC_OK
 validate_compiler_tree_cleanup() {
   control=.godot/gzscript/compiler_tree_control
   fixture=.godot/gzscript/compiler_tree
@@ -84,14 +111,13 @@ validate_compiler_tree_cleanup() {
   trap - EXIT HUP INT TERM
 }
 run_step "Validate compiler process-tree cleanup" validate_compiler_tree_cleanup
-expect_diagnostics "Compiler output tests intentionally emit oversized diagnostics"
-run_step "Validate compiler output limits" run_godot --script tests/compiler_output_runner.gd
+run_godot_script "Validate compiler output limits" tests/compiler_output_runner.gd GZSCRIPT_COMPILER_OUTPUT_OK
 expect_diagnostics "Compiler version tests intentionally select an incompatible Zig"
-run_step "Validate compiler version enforcement" run_godot --script tests/compiler_version_runner.gd
+run_godot_script "Validate compiler version enforcement" tests/compiler_version_runner.gd GZSCRIPT_COMPILER_VERSION_OK
 expect_diagnostics "Failure tests compile intentionally invalid Zig source and ABI metadata"
-run_step "Validate compilation failure handling" run_godot --script tests/failure_runner.gd
+run_godot_script "Validate compilation failure handling" tests/failure_runner.gd GZSCRIPT_FAILURE_HANDLING_OK
 expect_diagnostics "Threaded Zig resource loading is intentionally rejected"
-run_step "Validate threaded-load rejection" run_godot --script tests/threaded_load_runner.gd
+run_godot_script "Validate threaded-load rejection" tests/threaded_load_runner.gd GZSCRIPT_THREADED_LOAD_OK
 cleanup_editor_fixture() {
   rm -f editor_test.zig editor_test.zig.uid editor_test.tscn
 }

@@ -51,7 +51,6 @@ func _run() -> void:
 		_fail("atomic save did not publish the final source")
 		return
 
-	script.take_over_path("")
 	_cleanup()
 	print("GZSCRIPT_SAVE_ATOMIC_OK")
 	quit()
