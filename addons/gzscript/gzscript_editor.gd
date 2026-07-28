@@ -148,7 +148,7 @@ func _rebuild_loaded_scripts() -> void:
 func _build() -> bool:
 	var bm = _get_build_manager()
 	if bm != null:
-		var success := bm.compile_all()
+		var success: bool = bm.compile_all()
 		if not success:
 			push_error(bm.get_last_diagnostics())
 		return success
