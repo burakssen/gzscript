@@ -59,6 +59,7 @@ class GzLspClient
   int64_t next_request_id = 1;
   uint64_t started_at_msec = 0;
   uint64_t failed_at_msec = 0;
+  uint64_t completion_due_msec = 0;
   int32_t consecutive_restarts = 0;
   std::unordered_map<int64_t, Request> requests;
   std::unordered_map<std::string, Document> documents;
@@ -69,6 +70,7 @@ class GzLspClient
   godot::Array cached_completion_options;
   godot::Dictionary cached_definition;
   bool has_pending_completion = false;
+  bool completion_in_flight = false;
   bool has_pending_definition = false;
   bool has_cached_completion = false;
   bool has_cached_definition = false;

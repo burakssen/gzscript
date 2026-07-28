@@ -10,12 +10,6 @@ var configured_script_editors := {}
 var zig_language: GzLanguage
 
 
-func _process(_delta: float) -> void:
-	GzBuildManager.pump()
-	if is_instance_valid(zig_language):
-		zig_language.pump_language_server()
-
-
 func _enter_tree() -> void:
 	for index in Engine.get_script_language_count():
 		var candidate := Engine.get_script_language(index)

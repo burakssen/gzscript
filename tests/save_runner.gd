@@ -2,6 +2,10 @@ extends SceneTree
 
 const SCRIPT_PATH := "res://sprite_2d_test.zig"
 const INVALID_SCRIPT_PATH := "res://invalid_save_test.zig"
+const COPY_PATH := "res://save_copy_test.zig"
+const MOVED_PATH := "res://save_as_test.zig"
+const RACE_SOURCE_PATH := "res://save_as_race_source.zig"
+const RACE_TARGET_PATH := "res://save_as_race_target.zig"
 const SCRIPT_SOURCE := """const gd = @import("godot");
 
 pub const Base = gd.Sprite2D;
@@ -27,7 +31,7 @@ func _run() -> void:
 	var run_id := Time.get_ticks_usec()
 	var script := GzScript.new()
 	script.source_code = _source(1, run_id)
-	var result := ResourceSaver.save(script, SCRIPT_PATH)
+	var result := ResourceSaver.save(script, SCRIPT_PATH, ResourceSaver.FLAG_CHANGE_PATH)
 	if result != OK:
 		push_error("New Zig script failed to save: %s" % error_string(result))
 		_cleanup()
@@ -44,6 +48,11 @@ func _run() -> void:
 	result = ResourceSaver.save(script, SCRIPT_PATH)
 	if result != OK:
 		push_error("Newer Zig script failed to save: %s" % error_string(result))
+		_cleanup()
+		quit(1)
+		return
+	if FileAccess.get_file_as_string(SCRIPT_PATH) != script.source_code:
+		push_error("Newer Zig source was not persisted before compilation")
 		_cleanup()
 		quit(1)
 		return
@@ -68,10 +77,30 @@ func _run() -> void:
 		_cleanup()
 		quit(1)
 		return
+	result = ResourceSaver.save(script, COPY_PATH)
+	if result != OK or script.resource_path != SCRIPT_PATH:
+		push_error("Saving a copy changed the Zig resource path")
+		_cleanup()
+		quit(1)
+		return
+	if FileAccess.get_file_as_string(COPY_PATH) != script.source_code:
+		push_error("Zig save copy did not persist source")
+		_cleanup()
+		quit(1)
+		return
+	result = ResourceSaver.save(script, MOVED_PATH, ResourceSaver.FLAG_CHANGE_PATH)
+	await process_frame
+	if result != OK or script.resource_path != MOVED_PATH:
+		push_error("Saving Zig source with FLAG_CHANGE_PATH did not update its resource path")
+		_cleanup()
+		quit(1)
+		return
+	if not await _wait_for_compilation():
+		return
 
 	var invalid_script := GzScript.new()
 	invalid_script.source_code = "pub fn broken( {\n"
-	result = ResourceSaver.save(invalid_script, INVALID_SCRIPT_PATH)
+	result = ResourceSaver.save(invalid_script, INVALID_SCRIPT_PATH, ResourceSaver.FLAG_CHANGE_PATH)
 	if result != OK:
 		push_error("Persisting invalid Zig source reported a save failure: %s" % error_string(result))
 		_cleanup()
@@ -90,12 +119,37 @@ func _run() -> void:
 		quit(1)
 		return
 
+	var moved_while_queued := GzScript.new()
+	moved_while_queued.source_code = _source(3, run_id)
+	if ResourceSaver.save(moved_while_queued, RACE_SOURCE_PATH, ResourceSaver.FLAG_CHANGE_PATH) != OK:
+		push_error("Unable to save queued Save As source")
+		_cleanup()
+		quit(1)
+		return
+	if ResourceSaver.save(moved_while_queued, RACE_TARGET_PATH, ResourceSaver.FLAG_CHANGE_PATH) != OK:
+		push_error("Unable to move queued Save As source")
+		_cleanup()
+		quit(1)
+		return
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(RACE_SOURCE_PATH))
+	if not await _wait_for_compilation():
+		return
+	if moved_while_queued.resource_path != RACE_TARGET_PATH or not moved_while_queued.can_instantiate():
+		push_error("Queued Save As compiled the obsolete resource path")
+		_cleanup()
+		quit(1)
+		return
+
+	script.take_over_path("")
+	invalid_script.take_over_path("")
+	moved_while_queued.take_over_path("")
 	_cleanup()
 	print("GZSCRIPT_SAVE_OK")
 	quit()
 
 
 func _wait_for_compilation() -> bool:
+	await process_frame
 	var deadline := Time.get_ticks_msec() + 60_000
 	while Time.get_ticks_msec() < deadline:
 		if not GzBuildManager.is_compiling():
@@ -125,5 +179,5 @@ func _source(value: int, run_id: int) -> String:
 
 
 func _cleanup() -> void:
-	for path in [SCRIPT_PATH, SCRIPT_PATH + ".uid", INVALID_SCRIPT_PATH, INVALID_SCRIPT_PATH + ".uid"]:
+	for path in [SCRIPT_PATH, SCRIPT_PATH + ".uid", INVALID_SCRIPT_PATH, INVALID_SCRIPT_PATH + ".uid", COPY_PATH, COPY_PATH + ".uid", MOVED_PATH, MOVED_PATH + ".uid", RACE_SOURCE_PATH, RACE_SOURCE_PATH + ".uid", RACE_TARGET_PATH, RACE_TARGET_PATH + ".uid"]:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))

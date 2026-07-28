@@ -40,6 +40,44 @@ expect_diagnostics "Save tests compile intentionally invalid Zig source"
 run_step "Validate asynchronous saves" run_godot --script tests/save_runner.gd
 expect_diagnostics "Cache tests reject worker compilation and intentionally corrupt modules"
 run_step "Validate module cache and reloads" run_godot --script tests/cache_runner.gd
+run_step "Validate compilation identity races" run_godot --script tests/compiler_race_runner.gd
+run_step "Validate cross-process compiler locking" run_godot --script tests/compiler_lock_runner.gd
+run_step "Validate crash-atomic resource saves" run_godot --script tests/save_atomic_runner.gd
+validate_compiler_tree_cleanup() {
+  control=.godot/gzscript/compiler_tree_control
+  fixture=.godot/gzscript/compiler_tree
+  child_pid=
+  cleanup_compiler_tree() {
+    if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
+      child_command=$(ps -p "$child_pid" -o command= 2>/dev/null || true)
+      case "$child_command" in
+        *"sleep 30"*) kill -9 "$child_pid" 2>/dev/null || true ;;
+      esac
+    fi
+    rm -rf "$control" "$fixture"
+  }
+  rm -rf "$control" "$fixture"
+  trap cleanup_compiler_tree EXIT HUP INT TERM
+  if run_godot --script tests/compiler_tree_runner.gd; then
+    :
+  else
+    status=$?
+    return "$status"
+  fi
+  child_pid=$(cat "$control/child_pid")
+  sleep 1
+  if kill -0 "$child_pid" 2>/dev/null; then
+    printf '%s\n' "compiler descendant $child_pid survived manager shutdown" >&2
+    return 1
+  fi
+  cleanup_compiler_tree
+  trap - EXIT HUP INT TERM
+}
+run_step "Validate compiler process-tree cleanup" validate_compiler_tree_cleanup
+expect_diagnostics "Compiler output tests intentionally emit oversized diagnostics"
+run_step "Validate compiler output limits" run_godot --script tests/compiler_output_runner.gd
+expect_diagnostics "Compiler version tests intentionally select an incompatible Zig"
+run_step "Validate compiler version enforcement" run_godot --script tests/compiler_version_runner.gd
 expect_diagnostics "Failure tests compile intentionally invalid Zig source and ABI metadata"
 run_step "Validate compilation failure handling" run_godot --script tests/failure_runner.gd
 expect_diagnostics "Threaded Zig resource loading is intentionally rejected"

@@ -4,6 +4,7 @@ const FIXTURE_DIR := "res://.godot/gzscript/cache_test"
 const SCRIPT_PATH := FIXTURE_DIR + "/main.zig"
 const HELPER_PATH := FIXTURE_DIR + "/helper.zig"
 const EMBEDDED_PATH := FIXTURE_DIR + "/data.txt"
+const UNRELATED_PATH := FIXTURE_DIR + "/unrelated.txt"
 
 const SCRIPT_SOURCE := """const gd = @import("godot");
 const helper = @import("helper.zig");
@@ -44,14 +45,29 @@ func _initialize() -> void:
 	var new_modules := after_files.filter(func(path: String) -> bool: return path not in before_files)
 	if not _require(new_modules.size() == 1, "unable to identify initial cache module"):
 		return
+	var initial_module_bytes := FileAccess.get_file_as_bytes(new_modules[0])
 	_write(new_modules[0], "not a native library")
 	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "corrupt cache module was not rebuilt automatically"):
 		return
+	_write(UNRELATED_PATH, "not a Zig dependency\n")
+	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "cache check failed after unrelated file change"):
+		return
+	if not _require(_module_count() == after_initial, "unrelated project file changed the Zig cache identity"):
+		return
 
+	var before_helper_files := _module_files()
 	_write(HELPER_PATH, "pub const value: i64 = 2;\n")
 	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "fixture recompile failed"):
 		return
 	if not _require(_module_count() == after_initial + 1, "changing an imported Zig file reused a stale module"):
+		return
+	var helper_modules := _module_files().filter(func(path: String) -> bool: return path not in before_helper_files)
+	if not _require(helper_modules.size() == 1, "unable to identify imported-file cache module"):
+		return
+	_write_bytes(helper_modules[0], initial_module_bytes)
+	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "valid stale cache module was not rebuilt"):
+		return
+	if not _require(FileAccess.get_file_as_bytes(helper_modules[0]) != initial_module_bytes, "valid stale cache module replaced newly compiled output"):
 		return
 
 	_write(EMBEDDED_PATH, "2\n")
@@ -74,6 +90,17 @@ func _initialize() -> void:
 		return
 	if not _require(not GzBuildManager.get_last_diagnostics().is_empty(), "compile failure produced no diagnostics"):
 		return
+	script.set_source_code("pub fn broken( {\n")
+	if not _require(script.reload(false) == ERR_COMPILATION_FAILED, "invalid reload unexpectedly succeeded"):
+		return
+	if not _require(script.can_instantiate(), "failed reload disabled the last accepted module"):
+		return
+	var fallback_instance := Node.new()
+	fallback_instance.set_script(script)
+	if not _require(fallback_instance.get("value") == 4, "failed reload did not preserve the last accepted module"):
+		fallback_instance.free()
+		return
+	fallback_instance.free()
 
 	_write(SCRIPT_PATH, SCRIPT_SOURCE)
 	script.set_source_code(SCRIPT_SOURCE)
@@ -131,6 +158,16 @@ func _write(path: String, contents: String) -> void:
 		_fail("unable to write fixture: " + path)
 		return
 	file.store_string(contents)
+	file.close()
+
+
+func _write_bytes(path: String, contents: PackedByteArray) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		_fail("unable to write fixture: " + path)
+		return
+	file.store_buffer(contents)
+	file.close()
 
 
 func _require(condition: bool, message: String) -> bool:
@@ -146,7 +183,7 @@ func _fail(message: String) -> void:
 
 
 func _cleanup() -> void:
-	var paths := [SCRIPT_PATH, SCRIPT_PATH + ".uid", HELPER_PATH, HELPER_PATH + ".uid"]
+	var paths := [SCRIPT_PATH, SCRIPT_PATH + ".uid", HELPER_PATH, HELPER_PATH + ".uid", UNRELATED_PATH]
 	paths.append_array([EMBEDDED_PATH, EMBEDDED_PATH + ".uid"])
 	for path in paths:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))

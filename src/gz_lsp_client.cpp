@@ -11,18 +11,28 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <cstdlib>
+#include <algorithm>
+#include <string_view>
 
 using namespace godot;
 
 namespace
 {
+  constexpr std::size_t PIPE_READ_LIMIT = 64 * 1024;
+  constexpr std::size_t HEADER_LIMIT = 16 * 1024;
+  constexpr std::size_t MESSAGE_LIMIT = 8 * 1024 * 1024;
+  constexpr std::size_t INPUT_LIMIT = HEADER_LIMIT + 4 + MESSAGE_LIMIT;
+
   constexpr const char *ZLS_PATH_SETTING =
       "gzscript/language_server/zls_path";
   constexpr uint64_t INITIALIZE_TIMEOUT_MSEC = 5'000;
   constexpr uint64_t REQUEST_TIMEOUT_MSEC = 5'000;
   constexpr uint64_t RESTART_BACKOFF_MSEC = 1'000;
+  constexpr uint64_t COMPLETION_DEBOUNCE_MSEC = 75;
   constexpr std::size_t STDERR_LIMIT = 16 * 1024;
+  constexpr std::size_t MAX_COMPLETION_ITEMS = 512;
+  constexpr std::size_t MAX_MESSAGES_PER_PUMP = 8;
+  constexpr uint64_t MESSAGE_BUDGET_USEC = 1'500;
 
   std::string key(const String &value)
   {
@@ -194,7 +204,8 @@ void GzLspClient::drain(const Ref<FileAccess> &pipe, std::string &output)
   int64_t available = pipe->get_length();
   if (available <= 0)
     return;
-  PackedByteArray bytes = pipe->get_buffer(available);
+  PackedByteArray bytes =
+      pipe->get_buffer(std::min<int64_t>(available, PIPE_READ_LIMIT));
   if (!bytes.is_empty())
     output.append(reinterpret_cast<const char *>(bytes.ptr()), bytes.size());
 }
@@ -260,6 +271,7 @@ void GzLspClient::fail(const String &message)
   state = State::FAILED;
   failed_at_msec = Time::get_singleton()->get_ticks_msec();
   has_pending_completion = false;
+  completion_in_flight = false;
   has_pending_definition = false;
   requests.clear();
   documents.clear();
@@ -353,6 +365,7 @@ void GzLspClient::send_completion(const Query &query)
   params["position"] = position(query);
   request("textDocument/completion", params,
           Request{Request::Kind::COMPLETION, query});
+  completion_in_flight = true;
 }
 
 void GzLspClient::send_definition(const Query &query)
@@ -381,7 +394,9 @@ Array GzLspClient::completion_options(const Variant &result)
   }
 
   Array options;
-  for (int64_t index = 0; index < items.size(); ++index)
+  const int64_t count =
+      std::min<int64_t>(items.size(), MAX_COMPLETION_ITEMS);
+  for (int64_t index = 0; index < count; ++index)
   {
     if (items[index].get_type() != Variant::DICTIONARY)
       continue;
@@ -444,9 +459,12 @@ void GzLspClient::handle_response(int64_t id, const Dictionary &message)
   requests.erase(iterator);
   if (message.has("error"))
   {
-    if (pending.kind == Request::Kind::COMPLETION &&
-        same_query(pending.query, pending_completion))
-      has_pending_completion = false;
+    if (pending.kind == Request::Kind::COMPLETION)
+    {
+      completion_in_flight = false;
+      if (same_query(pending.query, pending_completion))
+        has_pending_completion = false;
+    }
     if (pending.kind == Request::Kind::DEFINITION &&
         same_query(pending.query, pending_definition))
       has_pending_definition = false;
@@ -472,14 +490,13 @@ void GzLspClient::handle_response(int64_t id, const Dictionary &message)
     notify("initialized", initialized);
     state = State::READY;
     consecutive_restarts = 0;
-    if (has_pending_completion)
-      send_completion(pending_completion);
     if (has_pending_definition)
       send_definition(pending_definition);
     return;
   }
   if (pending.kind == Request::Kind::COMPLETION)
   {
+    completion_in_flight = false;
     if (!has_pending_completion ||
         !same_query(pending.query, pending_completion))
       return;
@@ -534,26 +551,74 @@ void GzLspClient::handle(const Dictionary &message)
 
 void GzLspClient::parse_messages()
 {
+  const uint64_t started_at = Time::get_singleton()->get_ticks_usec();
+  std::size_t parsed_messages = 0;
   while (true)
   {
+    if (parsed_messages >= MAX_MESSAGES_PER_PUMP ||
+        Time::get_singleton()->get_ticks_usec() - started_at >=
+            MESSAGE_BUDGET_USEC)
+      return;
     std::size_t header_end = input.find("\r\n\r\n");
     if (header_end == std::string::npos)
+    {
+      if (input.size() > HEADER_LIMIT)
+        fail("ZLS sent an oversized JSON-RPC header");
       return;
-    std::size_t length_start = input.find("Content-Length:");
-    if (length_start == std::string::npos || length_start > header_end)
-    {
-      input.erase(0, header_end + 4);
-      continue;
     }
-    length_start += 15;
-    while (length_start < header_end && input[length_start] == ' ')
-      ++length_start;
-    char *end = nullptr;
-    unsigned long length = std::strtoul(input.c_str() + length_start, &end, 10);
-    if (end == input.c_str() + length_start)
+    if (header_end > HEADER_LIMIT)
     {
-      input.erase(0, header_end + 4);
-      continue;
+      fail("ZLS sent an oversized JSON-RPC header");
+      return;
+    }
+
+    std::size_t length = 0;
+    bool has_length = false;
+    std::size_t line_start = 0;
+    while (line_start < header_end)
+    {
+      std::size_t line_end = input.find("\r\n", line_start);
+      if (line_end == std::string::npos || line_end > header_end)
+        line_end = header_end;
+      const std::string_view line(input.data() + line_start,
+                                  line_end - line_start);
+      constexpr std::string_view prefix = "Content-Length:";
+      if (line.size() >= prefix.size() &&
+          line.substr(0, prefix.size()) == prefix)
+      {
+        if (has_length)
+        {
+          fail("ZLS sent duplicate Content-Length headers");
+          return;
+        }
+        std::size_t cursor = prefix.size();
+        while (cursor < line.size() && line[cursor] == ' ')
+          ++cursor;
+        if (cursor == line.size())
+        {
+          fail("ZLS sent an invalid Content-Length header");
+          return;
+        }
+        for (; cursor < line.size(); ++cursor)
+        {
+          const char digit = line[cursor];
+          if (digit < '0' || digit > '9' ||
+              length > (MESSAGE_LIMIT - static_cast<std::size_t>(digit - '0')) /
+                           10)
+          {
+            fail("ZLS sent an invalid or oversized Content-Length header");
+            return;
+          }
+          length = length * 10 + static_cast<std::size_t>(digit - '0');
+        }
+        has_length = true;
+      }
+      line_start = line_end + 2;
+    }
+    if (!has_length)
+    {
+      fail("ZLS response omitted Content-Length");
+      return;
     }
     std::size_t body_start = header_end + 4;
     if (input.size() - body_start < length)
@@ -563,6 +628,7 @@ void GzLspClient::parse_messages()
     Variant parsed = JSON::parse_string(body);
     if (parsed.get_type() == Variant::DICTIONARY)
       handle(parsed);
+    ++parsed_messages;
   }
 }
 
@@ -577,8 +643,9 @@ Array GzLspClient::complete(const String &code, const String &path)
     return {};
   pending_completion = query;
   has_pending_completion = true;
-  if (start() && state == State::READY)
-    send_completion(query);
+  completion_due_msec = Time::get_singleton()->get_ticks_msec() +
+                        COMPLETION_DEBOUNCE_MSEC;
+  start();
   return {};
 }
 
@@ -604,9 +671,14 @@ void GzLspClient::pump()
     return;
   drain(stdio_pipe, input);
   drain(stderr_pipe, stderr_output);
+  parse_messages();
+  if (input.size() > INPUT_LIMIT)
+  {
+    fail("ZLS exceeded the JSON-RPC input buffer limit");
+    return;
+  }
   if (stderr_output.size() > STDERR_LIMIT)
     stderr_output.erase(0, stderr_output.size() - STDERR_LIMIT);
-  parse_messages();
   if (!OS::get_singleton()->is_process_running(pid))
   {
     fail("ZLS exited unexpectedly" +
@@ -634,12 +706,18 @@ void GzLspClient::pump()
       ++iterator;
       continue;
     }
-    if (pending.kind == Request::Kind::COMPLETION &&
-        same_query(pending.query, pending_completion))
-      has_pending_completion = false;
+    if (pending.kind == Request::Kind::COMPLETION)
+    {
+      completion_in_flight = false;
+      if (same_query(pending.query, pending_completion))
+        has_pending_completion = false;
+    }
     if (pending.kind == Request::Kind::DEFINITION &&
         same_query(pending.query, pending_definition))
       has_pending_definition = false;
     iterator = requests.erase(iterator);
   }
+  if (state == State::READY && has_pending_completion &&
+      !completion_in_flight && now >= completion_due_msec)
+    send_completion(pending_completion);
 }

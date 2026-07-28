@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gz_compiled_module.hpp"
+#include "gz_file_utils.hpp"
 #include "gz_script.hpp"
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -34,6 +35,8 @@ class GzBuildManager : public godot::Object {
     godot::PackedStringArray arguments;
     bool needs_compile = false;
     godot::String hash_path;
+    godot::String lock_path;
+    godot::String stamp_output;
     godot::String source_hash;
   };
 
@@ -42,6 +45,7 @@ class GzBuildManager : public godot::Object {
     godot::String resource_path;
     godot::String source;
     uint64_t generation = 0;
+    std::unique_ptr<CompilePlan> prepared;
   };
 
   struct ActiveCompile {
@@ -50,8 +54,11 @@ class GzBuildManager : public godot::Object {
     godot::Ref<godot::FileAccess> stdout_pipe;
     godot::Ref<godot::FileAccess> stderr_pipe;
     std::string output;
+    bool output_truncated = false;
+    bool timed_out = false;
     int32_t pid = -1;
     uint64_t started_at_msec = 0;
+    std::unique_ptr<GzFileLock> cache_lock;
   };
 
   std::deque<CompileRequest> pending;
@@ -65,8 +72,11 @@ class GzBuildManager : public godot::Object {
                                             const godot::String &output);
   void start_next();
   void complete_active(int exit_code);
+  int run_process(const godot::String &executable,
+                  const godot::PackedStringArray &arguments,
+                  godot::String &output);
   static void drain(const godot::Ref<godot::FileAccess> &pipe,
-                     std::string &output);
+                    std::string &output, bool &truncated);
 
 protected:
   static void _bind_methods();
@@ -81,6 +91,8 @@ public:
   std::shared_ptr<GzCompiledModule> compile(const godot::String &resource_path,
                                             const godot::String &source);
   void queue_compile(const godot::Ref<GzScript> &script);
+  void queue_saved(const godot::Ref<GzScript> &script,
+                   const godot::String &saved_path);
   void queue_all();
   void pump();
   void wait_for_all();

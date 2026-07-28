@@ -57,7 +57,7 @@ func _open_zig_script() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SCRIPT_PATH.get_base_dir()))
 	var script := GzScript.new()
 	script.source_code = SCRIPT_SOURCE
-	if ResourceSaver.save(script, SCRIPT_PATH) != OK:
+	if ResourceSaver.save(script, SCRIPT_PATH, ResourceSaver.FLAG_CHANGE_PATH) != OK:
 		push_error("Unable to save Zig script for editor test")
 		_cleanup()
 		quit(1)
@@ -208,6 +208,7 @@ func _wait_for_compilation() -> bool:
 	while Time.get_ticks_msec() < deadline:
 		GzBuildManager.pump()
 		if not GzBuildManager.is_compiling():
+			await process_frame
 			return true
 		await create_timer(0.01).timeout
 	push_error("Timed out waiting for Zig compilation")

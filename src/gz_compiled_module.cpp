@@ -22,6 +22,76 @@ using namespace godot;
 
 namespace
 {
+  constexpr uint32_t DESCRIPTOR_COUNT_LIMIT = 65'536;
+  constexpr std::size_t DESCRIPTOR_STRING_LIMIT = 1024 * 1024;
+
+  bool valid_view(GzStringView view, bool allow_empty = true)
+  {
+    if (view.len == 0)
+      return allow_empty;
+    return view.ptr != nullptr && view.len <= DESCRIPTOR_STRING_LIMIT;
+  }
+
+  bool valid_value_type(uint32_t type) { return type <= GZ_VALUE_RECT2; }
+
+  bool valid_property_hint(uint32_t hint)
+  {
+    return hint == GZ_PROPERTY_HINT_NONE || hint == GZ_PROPERTY_HINT_RANGE ||
+           hint == GZ_PROPERTY_HINT_ENUM || hint == GZ_PROPERTY_HINT_FILE ||
+           hint == GZ_PROPERTY_HINT_MULTILINE_TEXT;
+  }
+
+  String validate_descriptor(const GzScriptDescriptor *descriptor)
+  {
+    if (!valid_view(descriptor->base_class, false))
+      return "Compiled Zig script has an invalid base class";
+    if (descriptor->method_count > DESCRIPTOR_COUNT_LIMIT ||
+        descriptor->property_count > DESCRIPTOR_COUNT_LIMIT ||
+        descriptor->inspector_entry_count > DESCRIPTOR_COUNT_LIMIT ||
+        descriptor->signal_count > DESCRIPTOR_COUNT_LIMIT)
+      return "Compiled Zig script descriptor exceeds metadata limits";
+
+    for (uint32_t i = 0; i < descriptor->method_count; ++i)
+      if (!valid_view(descriptor->methods[i].name, false))
+        return "Compiled Zig script has invalid method metadata";
+
+    for (uint32_t i = 0; i < descriptor->property_count; ++i)
+    {
+      const GzPropertyDescriptor &property = descriptor->properties[i];
+      if (!valid_view(property.name, false) ||
+          !valid_view(property.hint_string) ||
+          !valid_view(property.class_name) ||
+          !valid_value_type(property.type) ||
+          !valid_property_hint(property.hint) ||
+          !valid_value_type(property.default_value.type) ||
+          (property.default_value.type == GZ_VALUE_STRING &&
+           !valid_view(property.default_value.data.string)))
+        return "Compiled Zig script has invalid property metadata";
+    }
+
+    for (uint32_t i = 0; i < descriptor->inspector_entry_count; ++i)
+    {
+      const GzInspectorEntryDescriptor &entry =
+          descriptor->inspector_entries[i];
+      if (!valid_view(entry.name) || !valid_view(entry.prefix))
+        return "Compiled Zig script has invalid Inspector metadata";
+    }
+
+    for (uint32_t i = 0; i < descriptor->signal_count; ++i)
+    {
+      const GzSignalDescriptor &signal = descriptor->signals[i];
+      if (!valid_view(signal.name, false) ||
+          signal.argument_count > DESCRIPTOR_COUNT_LIMIT ||
+          (signal.argument_count > 0 && !signal.arguments))
+        return "Compiled Zig script has invalid signal metadata";
+      for (uint32_t argument = 0; argument < signal.argument_count; ++argument)
+        if (!valid_view(signal.arguments[argument].name, false) ||
+            !valid_value_type(signal.arguments[argument].type))
+          return "Compiled Zig script has invalid signal argument metadata";
+    }
+    return {};
+  }
+
   void log_info(GzStringView message)
   {
     UtilityFunctions::print_rich(gzscript::from_view(message));
@@ -425,6 +495,13 @@ GzCompiledModule::load(const String &p_path, String &error)
       (descriptor->signal_count > 0 && !descriptor->signals))
   {
     error = "Compiled Zig script descriptor is incomplete";
+    close_library(handle);
+    return {};
+  }
+
+  error = validate_descriptor(descriptor);
+  if (!error.is_empty())
+  {
     close_library(handle);
     return {};
   }

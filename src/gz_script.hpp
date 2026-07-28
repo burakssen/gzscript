@@ -18,6 +18,7 @@ class GzScript : public godot::ScriptExtension
   friend class GzBuildManager;
 
   godot::String source;
+  godot::String active_path;
   std::shared_ptr<GzCompiledModule> module;
   bool valid = false;
   uint64_t compile_generation = 0;
@@ -51,12 +52,19 @@ public:
   }
 
   void set_source(const godot::String &code) { source = code; }
+  void set_active_path(const godot::String &path)
+  {
+    active_path = path;
+    set_path_cache(path);
+  }
+  const godot::String &get_active_path() const { return active_path; }
   const std::shared_ptr<GzCompiledModule> &get_module() const { return module; }
   void remove_instance(void *instance) const { instances.erase(instance); }
 
   void publish_module(std::shared_ptr<GzCompiledModule> next_module);
   void _refresh_editor_instances(
       std::shared_ptr<GzCompiledModule> next_module);
+  void _apply_active_path();
   void _apply_pending_refresh();
 
   bool _editor_can_reload_from_file() override;

@@ -392,6 +392,8 @@ void GzScript::_bind_methods()
 {
   ClassDB::bind_method(D_METHOD("_apply_pending_refresh"),
                        &GzScript::_apply_pending_refresh);
+  ClassDB::bind_method(D_METHOD("_apply_active_path"),
+                       &GzScript::_apply_active_path);
 }
 
 GzScript::GzScript()
@@ -404,6 +406,12 @@ GzScript::~GzScript()
   pending_refresh = false;
   pending_module.reset();
   scripts.erase(this);
+}
+
+void GzScript::_apply_active_path()
+{
+  if (!active_path.is_empty())
+    take_over_path(active_path);
 }
 
 void GzScript::_schedule_pending_refresh()
@@ -611,7 +619,7 @@ Error GzScript::_reload(bool keep_state)
   auto next = GzBuildManager::get_singleton()->compile(get_path(), source);
   if (!next)
   {
-    valid = false;
+    valid = module != nullptr;
     emit_changed();
     return ERR_COMPILATION_FAILED;
   }
