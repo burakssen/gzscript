@@ -123,22 +123,22 @@ jobs:
           tar -xJf "$archive" -C "$RUNNER_TEMP/bin"
           "$RUNNER_TEMP/bin/zls" --version
 
-      - name: Install Godot 4.7 stable
+      - name: Install Godot 4.7.1 stable
         run: |
           archive="$RUNNER_TEMP/godot.zip"
           install_dir="$RUNNER_TEMP/godot"
           bin_dir="$RUNNER_TEMP/bin"
 
           curl -fsSLo "$archive" \
-            "https://github.com/godotengine/godot-builds/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip"
+            "https://github.com/godotengine/godot-builds/releases/download/4.7.1-stable/Godot_v4.7.1-stable_linux.x86_64.zip"
           printf '%s  %s\n' \
-            '0b1a6c54c2c619c12e169fe9241edda4b81080b519451cec2984bf0d2c6cb73c' \
+            'c7ff14fd28472c8d4f193043de30278dcf7e5241a1dcf7566b02e27addaa33ba' \
             "$archive" | sha256sum -c -
 
           mkdir -p "$install_dir" "$bin_dir"
           unzip -q "$archive" -d "$install_dir"
           install -m 755 \
-            "$install_dir/Godot_v4.7-stable_linux.x86_64" \
+            "$install_dir/Godot_v4.7.1-stable_linux.x86_64" \
             "$bin_dir/godot"
           "$bin_dir/godot" --version
           printf '%s\n' "$bin_dir" >> "$GITHUB_PATH"
