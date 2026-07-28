@@ -10,6 +10,7 @@ The current MVP targets macOS, Linux, and Windows on x86_64 and ARM64.
 
 - Godot 4.7 stable, single-precision build
 - Zig 0.16.0 installed locally
+- ZLS 0.16.x (optional, for built-in editor completion)
 - macOS, Linux, or Windows on x86_64 or ARM64
 
 ## Build
@@ -42,6 +43,20 @@ for macOS, Linux, and Windows on x86_64 and ARM64.
 4. Restart the editor.
 5. Select a node and use **Attach Script**.
 6. Choose **Zig**, create a `.zig` file, and save it.
+
+## Editor completion
+
+gzscript uses ZLS asynchronously for completion in Godot's built-in script
+editor. Install a ZLS 0.16.x release matching Zig 0.16, then restart Godot.
+gzscript resolves ZLS from **Project Settings > gzscript > language_server >
+zls_path**, `GZSCRIPT_ZLS_PATH`, the standard zvm path at `~/.zvm/bin/zls`, or
+`PATH`, in that order. The editor continues to work without ZLS, but semantic
+completion is unavailable.
+
+Completion never blocks the editor thread: the first request starts or queries
+ZLS, and the popup is refreshed after the matching response arrives. Snippets,
+hover, diagnostics, formatting, semantic tokens, rename, and references are not
+integrated yet. Save and Run diagnostics continue to come from the Zig compiler.
 
 gzscript resolves the compiler from **Project Settings > Gzscript > Compiler > Zig Path**, then `GZSCRIPT_ZIG_PATH`, then the standard zvm path at `~/.zvm/bin/zig`, and finally `zig` on `PATH`. Set **Zig Path** to an absolute executable path when using another version manager or when Godot is launched from the macOS GUI.
 
@@ -145,6 +160,7 @@ sh tests/run.sh
 ```
 
 This runs Zig reflection tests, headless lifecycle/property and save integration tests, invalid-source handling, and editor language/export refresh checks.
+When ZLS is installed, the editor test also verifies semantic completion.
 
 Benchmarks are intentionally separate from the correctness gate because shared
 CI runners do not provide stable timing. After building and importing the
@@ -172,7 +188,7 @@ the last accepted module remains active.
 - Threaded `ResourceLoader` requests for Zig scripts are rejected; initial loads must run on the main thread.
 - Active instances are not migrated after recompilation; see the reload contract above.
 - Only the listed Godot virtual callbacks are callable; arbitrary public Zig methods, static methods, RPC metadata, tool scripts, inheritance, and global script classes are not implemented yet.
-- Editor validation, completion, symbol lookup, debugger stacks, and profiling integration are not implemented yet. Compilation diagnostics are reported when a resource is loaded, saved, or Run is requested.
+- Editor validation, hover, asynchronous symbol lookup, debugger stacks, and profiling integration are not implemented yet. Completion is provided by an optional matching ZLS installation. Compilation diagnostics are reported when a resource is loaded, saved, or Run is requested.
 - Strings returned by raw `gd.Object.call` borrow engine storage until the next dynamic call on the same thread. Returned object wrappers are unowned IDs and are safe only while Godot or another owner retains the object.
 - Zig callbacks map `ready`, `enterTree`, `exitTree`, `process`, `physicsProcess`, `input`, `unhandledInput`, `shortcutInput`, `unhandledKeyInput`, `guiInput`, and `draw` to their Godot virtual methods. An optional `notification` method receives other Godot notifications by number.
 - Generated typed methods are limited to the ABI v5 scalar, typed object ID, string-input, vector, color, transform, rectangle, and enum type matrix.

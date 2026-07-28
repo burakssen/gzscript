@@ -169,6 +169,12 @@ func _open_zig_script() -> void:
 		_cleanup()
 		quit(1)
 		return
+	if _has_zls() and not await _wait_for_zls_completion(editor_interface):
+		push_error("ZLS completion did not return the inferred struct member")
+		editor_interface.close_scene()
+		_cleanup()
+		quit(1)
+		return
 	var lang: GzLanguage = null
 	for index in Engine.get_script_language_count():
 		var candidate := Engine.get_script_language(index)
@@ -235,7 +241,51 @@ func _wait_for_zig_highlighter(editor_interface) -> bool:
 	return false
 
 
+func _wait_for_zls_completion(editor_interface) -> bool:
+	var editor = editor_interface.get_script_editor().get_current_editor()
+	if editor == null:
+		return false
+	var code_edit := editor.get_base_editor() as CodeEdit
+	if code_edit == null:
+		return false
+	var original_text := code_edit.text
+	code_edit.text = """const Probe = struct { alpha: i32 };
+
+fn completion_probe() void {
+	var probe: Probe = undefined;
+	_ = probe.
+}
+"""
+	code_edit.set_caret_line(4)
+	code_edit.set_caret_column(code_edit.get_line(4).length())
+	code_edit.request_code_completion(true)
+	var deadline := Time.get_ticks_msec() + 12_000
+	while Time.get_ticks_msec() < deadline:
+		for option in code_edit.get_code_completion_options():
+			if option.get("display_text", "") == "alpha":
+				code_edit.text = original_text
+				return true
+		await process_frame
+	code_edit.text = original_text
+	return false
+
+
+func _has_zls() -> bool:
+	if not OS.get_environment("GZSCRIPT_ZLS_PATH").is_empty():
+		return true
+	var home := OS.get_environment("HOME")
+	if home.is_empty():
+		home = OS.get_environment("USERPROFILE")
+	var executable := "zls.exe" if OS.get_name() == "Windows" else "zls"
+	return FileAccess.file_exists(home.path_join(".zvm/bin").path_join(executable))
+
+
 func _cleanup() -> void:
+	var editor_interface = Engine.get_singleton("EditorInterface")
+	if editor_interface != null:
+		var script_editor = editor_interface.get_script_editor()
+		if script_editor != null:
+			script_editor.close_file(SCRIPT_PATH)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRIPT_PATH))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCRIPT_PATH + ".uid"))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SCENE_PATH))

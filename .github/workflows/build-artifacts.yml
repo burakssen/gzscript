@@ -111,6 +111,18 @@ jobs:
       - name: Install Zig 0.16.0
         run: sh .github/scripts/install-zig.sh
 
+      - name: Install ZLS 0.16.0
+        run: |
+          archive="$RUNNER_TEMP/zls.tar.xz"
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$archive" \
+            "https://github.com/zigtools/zls/releases/download/0.16.0/zls-x86_64-linux.tar.xz"
+          printf '%s  %s\n' \
+            'ded6d562a0b86ee878b1ddf70ffab2797ce3cdca3b02d6077548f9d56dff96b6' \
+            "$archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/zls" --version
+
       - name: Install Godot 4.7 stable
         run: |
           archive="$RUNNER_TEMP/godot.zip"

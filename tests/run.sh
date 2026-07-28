@@ -23,11 +23,13 @@ run_step "Run Zig unit tests" zig build test
 run_step "Check Zig formatting" zig fmt --check build.zig tools addons/gzscript/zig/*.zig examples/basic/scripts tests
 
 zig_executable=$(command -v zig)
+zls_executable=$(command -v zls || true)
 godot_executable=$(command -v godot)
 rm -rf .godot/gzscript
 
 run_godot() {
   env PATH=/usr/bin:/bin GZSCRIPT_ZIG_PATH="$zig_executable" \
+    GZSCRIPT_ZLS_PATH="$zls_executable" \
     "$godot_executable" --headless --path . "$@"
 }
 
@@ -43,7 +45,7 @@ run_step "Validate compilation failure handling" run_godot --script tests/failur
 expect_diagnostics "Threaded Zig resource loading is intentionally rejected"
 run_step "Validate threaded-load rejection" run_godot --script tests/threaded_load_runner.gd
 cleanup_editor_fixture() {
-  rm -f editor_test.zig editor_test.zig.uid
+  rm -f editor_test.zig editor_test.zig.uid editor_test.tscn
 }
 trap cleanup_editor_fixture EXIT
 printf '[RUN] Validate editor language integration\n'

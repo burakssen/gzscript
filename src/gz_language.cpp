@@ -1,6 +1,7 @@
 #include "gz_language.hpp"
 
 #include "gz_build_manager.hpp"
+#include "gz_lsp_client.hpp"
 #include "gz_script.hpp"
 
 #include <godot_cpp/classes/class_db_singleton.hpp>
@@ -14,9 +15,16 @@ void GzLanguage::_bind_methods()
 {
   ClassDB::bind_method(D_METHOD("make_template_for_base", "base_class_name"),
                        &GzLanguage::make_template_for_base);
+  ClassDB::bind_method(D_METHOD("pump_language_server"),
+                       &GzLanguage::pump_language_server);
+  ADD_SIGNAL(MethodInfo("completion_ready", PropertyInfo(Variant::STRING, "path")));
 }
 
-GzLanguage::GzLanguage() { singleton = this; }
+GzLanguage::GzLanguage()
+{
+  singleton = this;
+  lsp_client = std::make_unique<GzLspClient>(this);
+}
 GzLanguage::~GzLanguage()
 {
   if (singleton == this)
@@ -111,6 +119,8 @@ GzLanguage::make_template_for_base(const String &base_class_name) const
   return _make_template(String(), String(), base_class_name);
 }
 
+void GzLanguage::pump_language_server() { lsp_client->pump(); }
+
 TypedArray<Dictionary>
 GzLanguage::_get_built_in_templates(const StringName &object) const
 {
@@ -183,14 +193,12 @@ godot::Dictionary GzLanguage::_complete_code(
     const godot::String &path,
     godot::Object *owner) const
 {
-  (void)code;
-  (void)path;
   (void)owner;
   Dictionary result;
   result["result"] = OK;
   result["force"] = false;
   result["call_hint"] = String();
-  result["options"] = Array();
+  result["options"] = lsp_client->complete(code, path);
   return result;
 }
 
@@ -200,16 +208,15 @@ godot::Dictionary GzLanguage::_lookup_code(
     const godot::String &path,
     godot::Object *owner) const
 {
-  (void)code;
   (void)symbol;
-  (void)path;
   (void)owner;
+  Dictionary definition = lsp_client->lookup(code, path);
   Dictionary result;
-  result["result"] = ERR_UNAVAILABLE;
+  result["result"] = definition.is_empty() ? ERR_UNAVAILABLE : OK;
   result["type"] = LOOKUP_RESULT_SCRIPT_LOCATION;
   result["script"] = Variant();
-  result["script_path"] = String();
-  result["location"] = -1;
+  result["script_path"] = definition.get("script_path", String());
+  result["location"] = definition.get("location", -1);
   return result;
 }
 
@@ -296,7 +303,11 @@ GzLanguage::_profiling_get_frame_data(ScriptLanguageExtensionProfilingInfo *,
 {
   return 0;
 }
-void GzLanguage::_frame() { GzBuildManager::get_singleton()->pump(); }
+void GzLanguage::_frame()
+{
+  GzBuildManager::get_singleton()->pump();
+  pump_language_server();
+}
 bool GzLanguage::_handles_global_class_type(const String &) const
 {
   return false;

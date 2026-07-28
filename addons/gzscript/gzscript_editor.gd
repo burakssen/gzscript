@@ -7,13 +7,22 @@ var rebuild_timer: Timer
 var inspector_refresh_queued := false
 var zig_highlighter: EditorSyntaxHighlighter
 var configured_script_editors := {}
+var zig_language: GzLanguage
 
 
 func _process(_delta: float) -> void:
 	GzBuildManager.pump()
+	if is_instance_valid(zig_language):
+		zig_language.pump_language_server()
 
 
 func _enter_tree() -> void:
+	for index in Engine.get_script_language_count():
+		var candidate := Engine.get_script_language(index)
+		if candidate is GzLanguage:
+			zig_language = candidate
+			zig_language.completion_ready.connect(_retry_zls_completion)
+			break
 	zig_highlighter = ZigHighlighter.new()
 	var script_editor := EditorInterface.get_script_editor()
 	if script_editor != null:
@@ -38,6 +47,9 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
+	if is_instance_valid(zig_language) and zig_language.completion_ready.is_connected(_retry_zls_completion):
+		zig_language.completion_ready.disconnect(_retry_zls_completion)
+	zig_language = null
 	if is_instance_valid(zig_highlighter):
 		var se = EditorInterface.get_script_editor()
 		if se != null:
@@ -88,6 +100,22 @@ func _ensure_zig_highlighter(script) -> void:
 
 func _queue_rebuild() -> void:
 	rebuild_timer.start()
+
+
+func _retry_zls_completion(path: String) -> void:
+	var script_editor := _get_script_editor()
+	if script_editor == null:
+		return
+	var script := script_editor.get_current_script()
+	if not script is GzScript or script.resource_path != path:
+		return
+	var editor := script_editor.get_current_editor()
+	if editor == null:
+		return
+	var code_edit := editor.get_base_editor() as CodeEdit
+	if code_edit != null:
+		# ponytail: Retry only after ZLS cached this exact request; the hook stays synchronous.
+		code_edit.request_code_completion(true)
 
 
 func _queue_inspector_refresh() -> void:

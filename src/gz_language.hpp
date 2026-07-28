@@ -2,11 +2,16 @@
 
 #include <godot_cpp/classes/script_language_extension.hpp>
 
+#include <memory>
+
+class GzLspClient;
+
 class GzLanguage : public godot::ScriptLanguageExtension
 {
   GDCLASS(GzLanguage, godot::ScriptLanguageExtension)
 
   static GzLanguage *singleton;
+  mutable std::unique_ptr<GzLspClient> lsp_client;
 
 protected:
   static void _bind_methods();
@@ -15,6 +20,7 @@ public:
   GzLanguage();
   ~GzLanguage();
   static GzLanguage *get_singleton() { return singleton; }
+  void pump_language_server();
   godot::Ref<godot::Script>
   make_template_for_base(const godot::String &base_class_name) const;
 
