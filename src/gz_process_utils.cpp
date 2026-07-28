@@ -6,9 +6,11 @@
 #include <vector>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
+#include <windows.h> // ponytail: windows.h must precede tlhelp32.h for win32 type declarations
 #include <tlhelp32.h>
-#include <windows.h>
 #elif defined(__APPLE__)
 #include <csignal>
 #include <sys/sysctl.h>

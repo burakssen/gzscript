@@ -8,7 +8,13 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #ifdef WINDOWS_ENABLED
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
+#ifdef ERROR
+#undef ERROR
+#endif
 #else
 #include <dlfcn.h>
 #endif

@@ -4,8 +4,13 @@
 #include <godot_cpp/classes/time.hpp>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
+#ifdef ERROR
+#undef ERROR // ponytail: undefine WinGDI ERROR macro to avoid conflict with GzFileLock::Result::ERROR
+#endif
 #else
 #include <cerrno>
 #include <cstring>
