@@ -33,30 +33,21 @@ run_godot() {
     "$godot_executable" --headless --path . "$@"
 }
 
-# ponytail: Godot may SIGABRT during --import shutdown on headless Linux.
-# Verify import succeeded by checking the .godot directory instead of exit code.
-printf '[RUN] Import Godot project\n'
-if run_godot --import; then
-  printf '[PASS] Import Godot project\n'
-elif [ -d .godot/imported ]; then
-  printf '[PASS] Import Godot project (import completed, ignoring shutdown crash)\n'
-else
-  printf '[FAIL] Import Godot project\n' >&2
-  exit 1
-fi
-# ponytail: Godot headless on Linux may exit with SIGSEGV/SIGABRT during process teardown.
-# Accept execution if the expected script completion token was emitted.
+run_step "Import Godot project" run_godot --import
+
 run_godot_script() {
   label=$1
   script_path=$2
   success_token=$3
   printf '[RUN] %s\n' "$label"
   output=
-  status=0
   if output=$(run_godot --script "$script_path" 2>&1); then
-    status=0
+    :
   else
     status=$?
+    printf '%s\n' "$output" >&2
+    printf '[FAIL] %s\n' "$label" >&2
+    return "$status"
   fi
   case "$output" in
     *"$success_token"*)
@@ -66,7 +57,7 @@ run_godot_script() {
     *)
       printf '%s\n' "$output" >&2
       printf '[FAIL] %s\n' "$label" >&2
-      return "${status:-1}"
+      return 1
       ;;
   esac
 }
