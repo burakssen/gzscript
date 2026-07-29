@@ -272,10 +272,20 @@ pub fn build(b: *std.Build) void {
         else => unreachable,
     };
 
-    const install_gzscript = b.addInstallFile(
-        gzscript.getEmittedBin(),
-        install_path,
-    );
+    const install_source = if (os == .linux) source: {
+        const elf_patcher = b.addExecutable(.{
+            .name = "set-elf-nodelete",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/set_elf_nodelete.zig"),
+                .target = b.graph.host,
+            }),
+        });
+        const patch_elf = b.addRunArtifact(elf_patcher);
+        patch_elf.addFileArg(gzscript.getEmittedBin());
+        break :source patch_elf.addOutputFileArg(gzscript.out_filename);
+    } else gzscript.getEmittedBin();
+
+    const install_gzscript = b.addInstallFile(install_source, install_path);
 
     b.getInstallStep().dependOn(
         &install_gzscript.step,
@@ -329,6 +339,14 @@ fn getCxxFlags(
         .windows => &.{
             "-std=c++17",
             "-fno-exceptions",
+            "-Wwrite-strings",
+        },
+
+        .linux => &.{
+            "-std=c++17",
+            "-fno-exceptions",
+            "-fno-c++-static-destructors",
+            "-fvisibility=hidden",
             "-Wwrite-strings",
         },
 
