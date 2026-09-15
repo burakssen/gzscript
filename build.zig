@@ -32,7 +32,16 @@ pub fn build(b: *std.Build) void {
         },
     );
 
-    const cxx_flags = getCxxFlags(os);
+    const sanitize = b.option(
+        []const u8,
+        "sanitize",
+        "Compile the extension with sanitizers (e.g. -Dsanitize=address, " ++
+            "-Dsanitize=undefined, or -Dsanitize=address,undefined). The " ++
+            "shared library leaves sanitizer symbols undefined, so running " ++
+            "Godot requires preloading the sanitizer runtime, e.g. " ++
+            "LD_PRELOAD=$(gcc -print-file-name=libasan.so) godot ...",
+    ) orelse "none";
+    const cxx_flags = getCxxFlags(b, os, sanitize);
 
     const extension_api = godot_cpp_dependency.path(
         "gdextension/extension_api.json",
@@ -244,6 +253,13 @@ pub fn build(b: *std.Build) void {
         .root_module = gzscript_module,
     });
 
+    if (!std.mem.eql(u8, sanitize, "none")) {
+        // The sanitizer runtime is provided at load time via LD_PRELOAD /
+        // DYLD_INSERT_LIBRARIES, so undefined sanitizer symbols are allowed
+        // in the shared library.
+        gzscript.linker_allow_shlib_undefined = true;
+    }
+
     // -------------------------------------------------------------------------
     // Install using the exact names expected by gzscript.gdextension
     // -------------------------------------------------------------------------
@@ -333,9 +349,11 @@ fn applyGodotConfiguration(
 }
 
 fn getCxxFlags(
+    b: *std.Build,
     os: std.Target.Os.Tag,
+    sanitize: []const u8,
 ) []const []const u8 {
-    return switch (os) {
+    const base: []const []const u8 = switch (os) {
         .windows => &.{
             "-std=c++17",
             "-fno-exceptions",
@@ -357,6 +375,17 @@ fn getCxxFlags(
             "-Wwrite-strings",
         },
     };
+
+    if (sanitize.len == 0 or std.mem.eql(u8, sanitize, "none"))
+        return base;
+
+    // The build allocator is arena-backed, so this storage remains valid for
+    // the lifetime of the build graph.
+    var flags = b.allocator.alloc([]const u8, base.len + 2) catch @panic("out of memory");
+    @memcpy(flags[0..base.len], base);
+    flags[base.len] = b.fmt("-fsanitize={s}", .{sanitize});
+    flags[base.len + 1] = "-fno-omit-frame-pointer";
+    return flags;
 }
 
 fn addTopLevelCppSources(

@@ -2,7 +2,8 @@
 # Minimal lifecycle reproduction: build -> import -> one script/instance run.
 # Propagates the exact Godot exit code and prints it. No `|| true`.
 set -eu
-REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+unset CDPATH
+REPO_ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$REPO_ROOT"
 BUILD_MODE=${BUILD_MODE:-Debug}
 TIMEOUT_SECS=${TIMEOUT_SECS:-120}

@@ -2,7 +2,8 @@
 # Phase 1 stress: N consecutive lifecycle launch/shutdown cycles.
 # Minimum sign-off is 100 clean runs (BUILD_MODE=Debug and ReleaseFast).
 set -eu
-REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+unset CDPATH
+REPO_ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$REPO_ROOT"
 ITERATIONS=${1:-100}
 

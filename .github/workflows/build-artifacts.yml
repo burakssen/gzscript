@@ -30,6 +30,29 @@ jobs:
           zig build test
           zig fmt --check build.zig tools addons/gzscript/zig/*.zig examples/basic/scripts tests
 
+  quality:
+    name: Quality (format, shellcheck)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Zig 0.16.0
+        run: sh .github/scripts/install-zig.sh
+
+      - name: Install shellcheck
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+
+      - name: Check shell scripts
+        run: shellcheck -S warning tests/run.sh tests/run_integration_linux.sh tests/scripts/common.sh tests/lifecycle/run.sh tests/lifecycle/stress_shutdown.sh tests/fixtures/fake_tools/selftest.sh
+
+      - name: Check Zig formatting and generators
+        run: |
+          zig fmt --check build.zig tools addons/gzscript/zig/*.zig examples/basic/scripts tests
+          zig build check-bindings
+
   build:
     name: ${{ matrix.name }}
     needs: bindings
@@ -98,9 +121,116 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  integration:
-    name: Godot 4.7 integration (Linux x86_64)
-    needs: bindings
+  test-linux:
+    name: Linux / ${{ matrix.label }}
+    needs: [bindings, quality, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Unit
+            group: unit
+          - label: Compiler
+            group: compiler
+          - label: Cache
+            group: cache
+          - label: Concurrency
+            group: concurrency
+          - label: Runtime
+            group: runtime
+          - label: Lifecycle
+            group: lifecycle
+          - label: ZLS
+            group: lsp
+          - label: Editor
+            group: editor
+          - label: Integration
+            group: integration
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Zig 0.16.0
+        run: sh .github/scripts/install-zig.sh
+
+      - name: Install ZLS 0.16.0
+        run: |
+          archive="$RUNNER_TEMP/zls.tar.xz"
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo "$archive" \
+            "https://github.com/zigtools/zls/releases/download/0.16.0/zls-x86_64-linux.tar.xz"
+          printf '%s  %s\n' \
+            'ded6d562a0b86ee878b1ddf70ffab2797ce3cdca3b02d6077548f9d56dff96b6' \
+            "$archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/zls" --version
+
+      - name: Install Godot 4.7.1 stable
+        run: |
+          archive="$RUNNER_TEMP/godot.zip"
+          install_dir="$RUNNER_TEMP/godot"
+          bin_dir="$RUNNER_TEMP/bin"
+
+          curl -fsSLo "$archive" \
+            "https://github.com/godotengine/godot-builds/releases/download/4.7.1-stable/Godot_v4.7.1-stable_linux.x86_64.zip"
+          printf '%s  %s\n' \
+            'c7ff14fd28472c8d4f193043de30278dcf7e5241a1dcf7566b02e27addaa33ba' \
+            "$archive" | sha256sum -c -
+
+          mkdir -p "$install_dir" "$bin_dir"
+          unzip -q "$archive" -d "$install_dir"
+          install -m 755 \
+            "$install_dir/Godot_v4.7.1-stable_linux.x86_64" \
+            "$bin_dir/godot"
+          "$bin_dir/godot" --version
+          printf '%s\n' "$bin_dir" >> "$GITHUB_PATH"
+          printf '%s\n' "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Download Linux x86_64 binaries
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: gzscript-linux-x86_64
+          path: addons/gzscript/bin/
+          if-no-files-found: error
+
+      - name: Run ${{ matrix.group }} tests
+        run: sh tests/run.sh --no-build --flake-check ${{ matrix.group }}
+
+      - name: Upload JUnit reports
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: gzscript-junit-${{ matrix.group }}
+          path: test-results/**/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Collect crash diagnostics
+        if: failure()
+        run: |
+          mkdir -p crash-diagnostics
+          cp -r test-results crash-diagnostics/ 2>/dev/null || true
+          {
+            echo "=== pgrep zig ==="; pgrep -af "zig " || true
+            echo "=== pgrep zls ==="; pgrep -af "zls" || true
+            echo "=== core dumps ==="; coredumpctl list --no-pager 2>/dev/null || ls core* /var/crash 2>/dev/null || true
+          } > crash-diagnostics/processes.txt 2>&1 || true
+
+      - name: Upload crash diagnostics
+        if: failure()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: gzscript-crash-diagnostics-${{ matrix.group }}
+          path: crash-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
+  sanitizers-linux:
+    name: Linux / ASan + UBSan
+    needs: [bindings, quality]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -142,34 +272,31 @@ jobs:
             "$bin_dir/godot"
           "$bin_dir/godot" --version
           printf '%s\n' "$bin_dir" >> "$GITHUB_PATH"
+          printf '%s\n' "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
-      - name: Run integration suite
-        run: sh tests/run.sh
+      - name: Build instrumented extension
+        run: zig build --prefix . -Dtarget=x86_64-linux-gnu -Doptimize=Debug -Dsanitize=address,undefined -j2
 
-      - name: Collect crash diagnostics
-        if: failure()
+      - name: Run lifecycle and compiler tests under sanitizers
+        env:
+          ASAN_OPTIONS: abort_on_error=1:detect_leaks=1:symbolize=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: |
-          mkdir -p crash-diagnostics
-          cp -r .godot/gzscript/logs crash-diagnostics/ 2>/dev/null || true
-          find .godot -maxdepth 2 -name '*.log' -exec cp {} crash-diagnostics/ \; 2>/dev/null || true
-          {
-            echo "=== pgrep zig ==="; pgrep -af "zig " || true
-            echo "=== pgrep zls ==="; pgrep -af "zls" || true
-            echo "=== core dumps ==="; coredumpctl list --no-pager 2>/dev/null || ls core* /var/crash 2>/dev/null || true
-          } > crash-diagnostics/processes.txt 2>&1 || true
+          export LD_PRELOAD="$(gcc -print-file-name=libasan.so):$(gcc -print-file-name=libubsan.so)"
+          sh tests/run.sh --no-build lifecycle compiler
 
-      - name: Upload crash diagnostics
-        if: failure()
+      - name: Upload sanitizer results
+        if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: gzscript-crash-diagnostics
-          path: crash-diagnostics/
+          name: gzscript-sanitizer-results
+          path: test-results/
           if-no-files-found: warn
           retention-days: 14
 
   package:
     name: Package combined artifact
-    needs: [build, integration]
+    needs: [build, test-linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 

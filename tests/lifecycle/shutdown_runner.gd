@@ -15,46 +15,10 @@ extends SceneTree
 const FIXTURE_DIR := "res://.godot/gzscript/lifecycle"
 const SCRIPT_PATH := FIXTURE_DIR + "/main.zig"
 const PING := 9001
-const SOURCE_V1 := """const gd = @import("godot");
-
-pub const Base = gd.Node;
-const Self = @This();
-
-base: Base,
-pings: i64 = 0,
-
-pub const exports = .{ .pings = gd.property(.{}) };
-
-pub fn init(ctx: gd.InitContext) !Self {
-	return .{ .base = .{ .owner = ctx.owner } };
-}
-
-pub fn notification(self: *Self, what: i32) !void {
-	if (what == 9001) self.pings += 1;
-}
-"""
-const SOURCE_V2 := """const gd = @import("godot");
-
-pub const Base = gd.Node;
-const Self = @This();
-
-base: Base,
-pings: i64 = 0,
-generation: i64 = 2,
-
-pub const exports = .{
-	.pings = gd.property(.{}),
-	.generation = gd.property(.{}),
-};
-
-pub fn init(ctx: gd.InitContext) !Self {
-	return .{ .base = .{ .owner = ctx.owner } };
-}
-
-pub fn notification(self: *Self, what: i32) !void {
-	if (what == 9001) self.pings += 100;
-}
-"""
+# Canonical sources live in tests/fixtures/zig/; the runner copies them into
+# the disposable fixture dir so tests never mutate the originals.
+const SOURCE_V1_PATH := "res://tests/fixtures/zig/minimal.zig"
+const SOURCE_V2_PATH := "res://tests/fixtures/zig/minimal_v2.zig"
 
 
 func _initialize() -> void:
@@ -63,8 +27,13 @@ func _initialize() -> void:
 
 func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(FIXTURE_DIR))
+	var source_v1 := FileAccess.get_file_as_string(SOURCE_V1_PATH)
+	var source_v2 := FileAccess.get_file_as_string(SOURCE_V2_PATH)
+	if source_v1.is_empty() or source_v2.is_empty():
+		_fail("unable to read Zig fixtures")
+		return
 	# Phase 1: single script, single module, single instance executing code.
-	_write(SCRIPT_PATH, SOURCE_V1)
+	_write(SCRIPT_PATH, source_v1)
 	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "v1 compile failed"):
 		return
 	var script := load(SCRIPT_PATH) as Script
@@ -95,7 +64,7 @@ func _run() -> void:
 	if not _require(int(first.get("pings")) == 2, "first instance broke after sibling churn"):
 		return
 	# Phase 3: reload while an instance is alive (module generations).
-	_write(SCRIPT_PATH, SOURCE_V2)
+	_write(SCRIPT_PATH, source_v2)
 	if not _require(GzBuildManager.compile_path(SCRIPT_PATH), "v2 recompile failed"):
 		return
 	script = load(SCRIPT_PATH) as Script

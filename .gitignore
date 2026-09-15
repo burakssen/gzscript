@@ -1,6 +1,8 @@
 *.o
 *.os
 .godot/
+test-results/
+crash-diagnostics/
 addons/gzscript/bin/
 .zig-cache
 zig-pkg
