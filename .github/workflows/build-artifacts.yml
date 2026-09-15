@@ -228,6 +228,87 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  smoke:
+    name: Runtime Smoke / ${{ matrix.label }}
+    needs: [bindings, quality, build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x86_64
+            runner: ubuntu-24.04
+            artifact: gzscript-linux-x86_64
+            godot_url: https://github.com/godotengine/godot-builds/releases/download/4.7.1-stable/Godot_v4.7.1-stable_linux.x86_64.zip
+            godot_bin: Godot_v4.7.1-stable_linux.x86_64
+            godot_sha256: c7ff14fd28472c8d4f193043de30278dcf7e5241a1dcf7566b02e27addaa33ba
+          - label: Linux ARM64
+            runner: ubuntu-24.04-arm
+            artifact: gzscript-linux-arm64
+            godot_url: https://github.com/godotengine/godot-builds/releases/download/4.7.1-stable/Godot_v4.7.1-stable_linux.arm64.zip
+            godot_bin: Godot_v4.7.1-stable_linux.arm64
+            godot_sha256: ""
+          - label: macOS ARM64
+            runner: macos-15
+            artifact: gzscript-macos-arm64
+            godot_url: https://github.com/godotengine/godot-builds/releases/download/4.7.1-stable/Godot_v4.7.1-stable_macos.universal.zip
+            godot_bin: Godot.app/Contents/MacOS/Godot
+            godot_sha256: ""
+          - label: Windows x86_64
+            runner: windows-2022
+            artifact: gzscript-windows-x86_64
+            godot_url: https://github.com/godotengine/godot-builds/releases/download/4.7.1-stable/Godot_v4.7.1-stable_win64.exe.zip
+            godot_bin: Godot_v4.7.1-stable_win64.exe
+            godot_sha256: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Zig 0.16.0
+        shell: bash
+        run: sh .github/scripts/install-zig.sh
+
+      - name: Install Godot 4.7.1
+        shell: bash
+        env:
+          GODOT_URL: ${{ matrix.godot_url }}
+          GODOT_BIN_PATH: ${{ matrix.godot_bin }}
+          GODOT_SHA256: ${{ matrix.godot_sha256 }}
+        run: |
+          archive="$RUNNER_TEMP/godot-pkg"
+          curl -fsSLo "$archive" "$GODOT_URL"
+          # TODO: pin checksums for the non-Linux-x86_64 Godot binaries.
+          if [ -n "$GODOT_SHA256" ]; then
+            printf '%s  %s\n' "$GODOT_SHA256" "$archive" | sha256sum -c -
+          fi
+          unzip -q "$archive" -d "$RUNNER_TEMP/godot"
+          godot_exe="$RUNNER_TEMP/godot/$GODOT_BIN_PATH"
+          chmod +x "$godot_exe"
+          "$godot_exe" --version
+          printf 'GODOT_BIN=%s\n' "$godot_exe" >> "$GITHUB_ENV"
+
+      - name: Download platform binaries
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ${{ matrix.artifact }}
+          path: addons/gzscript/bin/
+          if-no-files-found: error
+
+      - name: Run runtime smoke test
+        shell: bash
+        run: sh tests/run.sh --no-build smoke
+
+      - name: Upload smoke results
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: gzscript-smoke-${{ matrix.label }}
+          path: test-results/smoke/
+          if-no-files-found: warn
+          retention-days: 14
+
   sanitizers-linux:
     name: Linux / ASan + UBSan
     needs: [bindings, quality]

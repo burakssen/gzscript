@@ -286,6 +286,17 @@ test "ABI v5 layouts remain stable" {
     try std.testing.expectEqual(@as(usize, 88), @offsetOf(gd.abi.ScriptDescriptor, "create_instance"));
 }
 
+test "comptime bool values emit exact ABI bytes" {
+    // Zig 0.16 miscompiles comptime-known extern-union bool literals
+    // (emits 0xAB); the engine traps reading such a default. Byte-check.
+    const truthy: gd.abi.Value = comptime gd.codec.toValue(true);
+    const truthy_bytes: [@sizeOf(gd.abi.Value)]u8 = @bitCast(truthy);
+    try std.testing.expectEqual(@as(u8, 1), truthy_bytes[8]);
+    const falsy: gd.abi.Value = comptime gd.codec.toValue(false);
+    const falsy_bytes: [@sizeOf(gd.abi.Value)]u8 = @bitCast(falsy);
+    try std.testing.expectEqual(@as(u8, 0), falsy_bytes[8]);
+}
+
 test "shared codec supports objects and nullable objects" {
     try std.testing.expect(gd.codec.isObjectType(TestObject));
     try std.testing.expect(!gd.codec.isObjectType(OwnerOnly));

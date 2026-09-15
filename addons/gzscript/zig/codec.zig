@@ -161,6 +161,17 @@ pub fn objectClassName(comptime T: type) []const u8 {
     return if (comptime isObjectType(Value)) Value.godot_class else "";
 }
 
+/// Zig 0.16 miscompiles comptime-known `extern union` initialization with a
+/// bool field: `.{ .boolean = true }` emits 0xAB instead of 0x01, so a
+/// natively loaded module carries a garbage bool default and the engine
+/// traps reading it. Zero-initializing through another arm and assigning
+/// the bool afterwards emits exact bytes, including at comptime.
+fn boolValue(value: bool) abi.Value {
+    var result: abi.Value = .{ .type = .boolean, .data = .{ .integer = 0 } };
+    result.data.boolean = value;
+    return result;
+}
+
 pub fn toValue(value: anytype) abi.Value {
     const T = @TypeOf(value);
     if (optionalChild(T)) |Child| {
@@ -170,7 +181,7 @@ pub fn toValue(value: anytype) abi.Value {
     if (comptime isObjectType(T)) return .{ .type = .object, .data = .{ .object_id = value.owner } };
     if (comptime isEnumType(T)) return .{ .type = .integer, .data = .{ .integer = @intFromEnum(value) } };
     return if (T == bool)
-        .{ .type = .boolean, .data = .{ .boolean = value } }
+        boolValue(value)
     else if (T == i8 or T == i16 or T == i32 or T == i64 or T == u8 or T == u16 or T == u32)
         .{ .type = .integer, .data = .{ .integer = @intCast(value) } }
     else if (T == f32 or T == f64)

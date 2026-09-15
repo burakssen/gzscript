@@ -3,6 +3,8 @@
 **gzscript** is a Godot 4.7 GDExtension that enables writing Godot scripts in **Zig 0.16.0**. It automatically compiles `.zig` files to content-addressed native modules on save—no custom engine build or project `build.zig` required.
 
 Supported platforms: macOS, Linux, and Windows (x86_64, ARM64).
+See [docs/platform-support.md](docs/platform-support.md) for the
+evidence-based build vs runtime-smoke matrix.
 
 ## Requirements
 
@@ -67,10 +69,12 @@ pub fn process(self: *Self, delta: f64) !void {
 
 ## Testing
 
-Run the full integration test suite:
+Run test groups (see [docs/testing.md](docs/testing.md)):
 
 ```sh
-sh tests/run.sh
+sh tests/run.sh fast        # quick feedback
+sh tests/run.sh full        # everything except stress
+sh tests/run.sh smoke       # cross-platform runtime smoke (this host)
 ```
 
 ## Current Limitations

@@ -17,6 +17,7 @@ Only behavior that genuinely requires Godot is tested through Godot.
 | lsp | ZLS completion transport (skips without ZLS) | `--editor --script` | `run.sh lsp` |
 | editor | language registration, reload, inspector refresh | `--editor --script` | `run.sh editor` |
 | integration | realistic end-to-end (basic scene) | headless | `run.sh integration` |
+| smoke | portable runtime proof (cold/warm/recompile) | headless `--script` | `run.sh smoke` |
 | stress | repeated lifecycle loops (nightly/manual) | headless `--script` | `run.sh stress` |
 
 ## Commands
@@ -86,15 +87,6 @@ always-on leak check complementing sanitizers.
 
 ## Sanitizers (Linux)
 
-```bash
-zig build --prefix . -Dtarget=x86_64-linux-gnu -Doptimize=Debug \
-  -Dsanitize=address,undefined
-export LD_PRELOAD="$(gcc -print-file-name=libasan.so):$(gcc -print-file-name=libubsan.so)"
-export ASAN_OPTIONS=abort_on_error=1:detect_leaks=1:symbolize=1
-export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
-sh tests/run.sh --no-build lifecycle compiler
-```
-
 This is also the `Linux / ASan + UBSan` CI job. Note: on macOS the
 instrumented library builds and links, but running it under Godot is blocked
 by Apple toolchain/dyld restrictions on preloading sanitizer runtimes into a
@@ -136,6 +128,7 @@ abandon-in-tree) and asserts no orphan compiler processes remain.
 | completion | lsp | editor | yes | yes | required | skips (not fails) without ZLS |
 | language | editor | editor | yes | yes | optional | registration, reload, inspector |
 | basic | integration | headless scene | no | yes | no | happy path + clean shutdown |
+| project | smoke | isolated project | no | yes | no | cold/warm/recompile, no ZLS |
 | lifecycle-loops | stress | script | no | yes | no | N× shutdown cycles |
 
 Conventions: behavior-describing names (`cache/reuse`, never `test_fix_3`);
@@ -149,6 +142,33 @@ never mutate, fixtures).
 `test-linux` matrix (`Unit/Compiler/Cache/Concurrency/Runtime/Lifecycle/ZLS/
 Editor/Integration`) downloads the `gzscript-linux-x86_64` artifact and runs
 one group per job with `--flake-check`; `sanitizers-linux` builds with
-`-Dsanitize` and runs lifecycle+compiler under ASan/UBSan; `package` needs
+`-Dsanitize` and runs lifecycle+compiler under ASan/UBSan; `smoke` matrix
+(`Linux x86_64/ARM64`, `macOS ARM64`, `Windows x86_64`) downloads the matching
+platform binaries and runs the portable smoke project; `package` needs
 `build` + `test-linux`. JUnit uploads always; full `test-results/` and
 process lists upload on failure.
+
+## Cross-platform smoke tests
+
+`tests/smoke/` is an isolated Godot project (own `project.godot`,
+`smoke.zig`, `smoke_runner.gd`) proving the packaged addon works end to end
+on a target: extension load, language registration, cold compile, instance
+create, `_ready`, property/method/signal bridging, a Godot API call,
+explicit destroy, warm-cache reuse, source-change recompile, clean shutdown.
+
+```bash
+sh tests/smoke/run.sh       # this host, dev addon
+sh tests/run.sh smoke       # through the dispatcher
+```
+
+Stages (each must print its markers and exit 0): cold compile, warm reuse
+(module bytes identical), source modification (`version` 1→2), recompile,
+process cleanup. The runner writes `smoke-result.json` (asserted field by
+field) and the shell validates the `.gdextension` mapping, produced module,
+shutdown counters, and orphan processes. `GODOT_BIN`/`ZIG_BIN`/
+`GZSCRIPT_SMOKE_ADDON_DIR` override the environment; no ZLS required.
+
+What smoke proves (and does not): it answers "does a packaged build work
+end to end on this OS/arch" — it is not a substitute for the full Linux
+suite, editor/LSP coverage, sanitizers, or hot reload. Support tiers and
+per-platform evidence live in docs/platform-support.md.

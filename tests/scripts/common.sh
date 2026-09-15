@@ -43,6 +43,7 @@ gz_load_config() {
   : "${TIMEOUT_LSP:=180}"
   : "${TIMEOUT_EDITOR:=180}"
   : "${TIMEOUT_INTEGRATION:=180}"
+  : "${TIMEOUT_SMOKE:=300}"
   : "${TIMEOUT_STRESS:=1500}"
   : "${STRESS_ITERATIONS:=100}"
 }

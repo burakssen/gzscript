@@ -5,7 +5,7 @@
 #   ./tests/run.sh [options] [group|group/test ...]
 #
 # Groups: build quality unit compiler cache concurrency runtime lifecycle
-#         lsp editor integration stress
+#         lsp editor integration smoke stress
 # Profiles: fast, full (default), stress
 # Examples:
 #   ./tests/run.sh fast
@@ -38,7 +38,7 @@ usage() {
 }
 
 list_tests() {
-  printf 'groups:\n  build quality unit compiler cache concurrency runtime lifecycle lsp editor integration stress\n'
+  printf 'groups:\n  build quality unit compiler cache concurrency runtime lifecycle lsp editor integration smoke stress\n'
   printf 'profiles:\n  fast full stress\n'
   printf 'tests:\n'
   printf '  build/extension build/import\n'
@@ -51,6 +51,7 @@ list_tests() {
   printf '  lsp/completion\n'
   printf '  editor/language\n'
   printf '  integration/basic\n'
+  printf '  smoke/project\n'
   printf '  stress/lifecycle-loops\n'
 }
 
@@ -63,6 +64,7 @@ GROUP_TIMEOUT_secs() {
     lifecycle) printf '%s' "$TIMEOUT_LIFECYCLE" ;;
     lsp|editor) printf '%s' "$TIMEOUT_EDITOR" ;;
     integration) printf '%s' "$TIMEOUT_INTEGRATION" ;;
+    smoke) printf '%s' "$TIMEOUT_SMOKE" ;;
     stress) printf '%s' "$TIMEOUT_STRESS" ;;
     *) printf '120' ;;
   esac
@@ -410,6 +412,11 @@ do_stress_lifecycle_loops() {
     -- sh "$ROOT/tests/lifecycle/stress_shutdown.sh" "$STRESS_ITERATIONS"
 }
 
+do_smoke_project() {
+  exec_shell smoke project "Cross-platform runtime smoke (cold/warm/recompile)" \
+    -- sh "$ROOT/tests/smoke/run.sh"
+}
+
 # --- runner ---------------------------------------------------------------
 # run_one_test <group> <name>: timing, metadata, flake rerun, summary line.
 run_one_test() {
@@ -469,6 +476,7 @@ GROUP_TESTS() {
     lsp) printf 'completion' ;;
     editor) printf 'language' ;;
     integration) printf 'basic' ;;
+    smoke) printf 'project' ;;
     stress) printf 'lifecycle-loops' ;;
   esac
 }
@@ -476,7 +484,7 @@ GROUP_TESTS() {
 expand_target() {
   case "$1" in
     fast) printf 'build quality unit compiler cache runtime/bindings lifecycle' ;;
-    full) printf 'build quality unit compiler cache concurrency runtime lifecycle lsp editor integration' ;;
+    full) printf 'build quality unit compiler cache concurrency runtime lifecycle lsp editor integration smoke' ;;
     stress) printf 'stress' ;;
     *) printf '%s' "$1" ;;
   esac
@@ -506,7 +514,7 @@ print_summary() {
   gz_log "Failed:   $p_fail"
   gz_log "Skipped:  $p_skip"
   gz_log "Flaky:    $p_flaky"
-  for p_g in build quality unit compiler cache concurrency runtime lifecycle lsp editor integration stress; do
+  for p_g in build quality unit compiler cache concurrency runtime lifecycle lsp editor integration smoke stress; do
     if [ -f "$(gz_results_dir "$p_g")/results.jsonl" ]; then
       gz_write_junit "$p_g"
     fi
@@ -530,7 +538,7 @@ main() {
   setup_invocation
   gz_print_environment
 
-  m_valid_groups=" build quality unit compiler cache concurrency runtime lifecycle lsp editor integration stress "
+  m_valid_groups=" build quality unit compiler cache concurrency runtime lifecycle lsp editor integration smoke stress "
   m_needs_build=0
   m_wipe_cache=0
   for m_arg in "$@"; do

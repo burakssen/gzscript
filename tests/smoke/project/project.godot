@@ -1,0 +1,13 @@
+; Engine configuration file.
+; Minimal isolated project for gzscript cross-platform smoke testing.
+
+config_version=5
+
+[application]
+
+config/name="gzscript smoke"
+config/features=PackedStringArray("4.7")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
