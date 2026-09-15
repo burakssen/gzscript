@@ -1,6 +1,7 @@
 #include "gz_language.hpp"
 
 #include "gz_build_manager.hpp"
+#include "gz_lifecycle.hpp"
 #include "gz_lsp_client.hpp"
 #include "gz_script.hpp"
 
@@ -35,7 +36,10 @@ String GzLanguage::_get_name() const { return "Zig"; }
 void GzLanguage::_init() {}
 String GzLanguage::_get_type() const { return "ZigScript"; }
 String GzLanguage::_get_extension() const { return "zig"; }
-void GzLanguage::_finish() {}
+void GzLanguage::_finish()
+{
+  shutdown();
+}
 
 PackedStringArray GzLanguage::_get_reserved_words() const
 {
@@ -120,6 +124,12 @@ GzLanguage::make_template_for_base(const String &base_class_name) const
 }
 
 void GzLanguage::pump_language_server() { lsp_client->pump(); }
+
+void GzLanguage::shutdown()
+{
+  if (lsp_client)
+    lsp_client->shutdown();
+}
 
 TypedArray<Dictionary>
 GzLanguage::_get_built_in_templates(const StringName &object) const
@@ -305,7 +315,10 @@ GzLanguage::_profiling_get_frame_data(ScriptLanguageExtensionProfilingInfo *,
 }
 void GzLanguage::_frame()
 {
-  GzBuildManager::get_singleton()->pump();
+  if (gz_lifecycle::is_shutting_down())
+    return;
+  if (GzBuildManager *manager = GzBuildManager::get_singleton())
+    manager->pump();
   pump_language_server();
 }
 bool GzLanguage::_handles_global_class_type(const String &) const

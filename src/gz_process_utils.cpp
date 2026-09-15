@@ -9,7 +9,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h> // ponytail: windows.h must precede tlhelp32.h for win32 type declarations
+#include <windows.h> // windows.h must precede tlhelp32.h for win32 type declarations
 #include <tlhelp32.h>
 #elif defined(__APPLE__)
 #include <csignal>

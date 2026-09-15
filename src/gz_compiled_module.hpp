@@ -1,6 +1,7 @@
 #pragma once
 
 #include "abi/gzscript_abi.h"
+#include "gz_lifecycle.hpp"
 
 #include <godot_cpp/core/property_info.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
@@ -9,15 +10,28 @@
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <vector>
 
+// Ownership model (Phase 1 invariant):
+//
+//   GzScript ──────┐
+//                  ├── GzCompiledModule (shared ownership)
+//   GzScriptInstance ┘
+//
+// The compiled native module stays loaded while any script resource or live
+// instance references it. dlclose()/FreeLibrary() runs exactly once, in
+// ~GzCompiledModule(). A GzScriptInstance pins its module generation, so
+// reloads can publish a newer generation while old instances keep executing
+// the retired one.
 class GzCompiledModule
 {
   void *handle = nullptr;
   const GzScriptDescriptor *descriptor = nullptr;
   godot::String path;
+  uint64_t debug_id = 0;
 
   // Hot-path metadata, owned by the compiled-module wrapper rather than the
   // unloadable Zig library.
@@ -32,10 +46,18 @@ class GzCompiledModule
   godot::Dictionary property_defaults;
 
 public:
+  GzCompiledModule();
   ~GzCompiledModule();
 
   static std::shared_ptr<GzCompiledModule> load(const godot::String &path,
                                                 godot::String &error);
+
+  // Releases cached Godot objects held in thread-local storage. Must run on
+  // the main thread while Godot is still alive (extension shutdown), so that
+  // thread-exit destructors never touch a torn-down engine.
+  static void clear_thread_caches();
+
+  uint64_t get_debug_id() const { return debug_id; }
 
   const GzScriptDescriptor *get_descriptor() const { return descriptor; }
   const godot::String &get_path() const { return path; }

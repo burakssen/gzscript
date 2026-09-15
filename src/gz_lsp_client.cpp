@@ -120,15 +120,62 @@ GzLspClient::GzLspClient(GzLanguage *owner) : language(owner)
 
 GzLspClient::~GzLspClient()
 {
+  shutdown();
+}
+
+void GzLspClient::shutdown()
+{
+  if (shutdown_started.exchange(true))
+    return;
+  GZ_TRACE("lsp", 0, "shutdown_begin");
+  // Stop accepting new work first so no request can revive the server.
+  has_pending_completion = false;
+  completion_in_flight = false;
+  has_pending_definition = false;
+  requests.clear();
+  documents.clear();
+  state = State::STOPPED;
+  const bool had_process = pid > 0;
   if (OS *os = OS::get_singleton())
   {
-    if (pid > 0 && os->is_process_running(pid))
-      os->kill(pid);
+    if (had_process)
+    {
+      // Prefer the LSP shutdown/exit handshake so the server flushes and
+      // exits on its own; fall back to terminate. stdin close unblocks a
+      // server waiting on a read.
+      if (os->is_process_running(pid))
+      {
+        notify("exit", Dictionary());
+        if (stdio_pipe.is_valid())
+          stdio_pipe->close();
+        uint64_t deadline = 0;
+        if (Time *time = Time::get_singleton())
+          deadline = time->get_ticks_msec() + 2000;
+        while (os->is_process_running(pid))
+        {
+          if (deadline != 0 && Time::get_singleton() &&
+              Time::get_singleton()->get_ticks_msec() >= deadline)
+          {
+            os->kill(pid);
+            break;
+          }
+          os->delay_msec(5);
+        }
+      }
+    }
   }
+  if (had_process)
+    gz_lifecycle::counters().lsp_processes.fetch_sub(1,
+                                                     std::memory_order_relaxed);
+  pid = -1;
   if (stdio_pipe.is_valid())
     stdio_pipe->close();
   if (stderr_pipe.is_valid())
     stderr_pipe->close();
+  stdio_pipe.unref();
+  stderr_pipe.unref();
+  input.clear();
+  GZ_TRACE("lsp", 0, "shutdown_complete");
 }
 
 GzLspClient::Query GzLspClient::make_query(const String &code,
@@ -215,6 +262,9 @@ void GzLspClient::drain(const Ref<FileAccess> &pipe, std::string &output)
 
 bool GzLspClient::start()
 {
+  if (shutdown_started.load(std::memory_order_acquire) ||
+      gz_lifecycle::is_shutting_down())
+    return false;
   if (state == State::READY || state == State::INITIALIZING)
     return true;
   if (state == State::FAILED)
@@ -237,6 +287,7 @@ bool GzLspClient::start()
   stdio_pipe = process["stdio"];
   stderr_pipe = process["stderr"];
   pid = process["pid"];
+  gz_lifecycle::counters().lsp_processes.fetch_add(1, std::memory_order_relaxed);
   state = State::INITIALIZING;
   started_at_msec = Time::get_singleton()->get_ticks_msec();
 
@@ -283,6 +334,9 @@ void GzLspClient::fail(const String &message)
     if (pid > 0 && os->is_process_running(pid))
       os->kill(pid);
   }
+  if (pid > 0)
+    gz_lifecycle::counters().lsp_processes.fetch_sub(1,
+                                                     std::memory_order_relaxed);
   pid = -1;
   if (stdio_pipe.is_valid())
     stdio_pipe->close();
@@ -673,6 +727,8 @@ Dictionary GzLspClient::lookup(const String &code, const String &path)
 
 void GzLspClient::pump()
 {
+  if (shutdown_started.load(std::memory_order_acquire))
+    return;
   if (state != State::INITIALIZING && state != State::READY)
     return;
   drain(stdio_pipe, input);

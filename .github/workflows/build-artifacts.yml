@@ -146,6 +146,27 @@ jobs:
       - name: Run integration suite
         run: sh tests/run.sh
 
+      - name: Collect crash diagnostics
+        if: failure()
+        run: |
+          mkdir -p crash-diagnostics
+          cp -r .godot/gzscript/logs crash-diagnostics/ 2>/dev/null || true
+          find .godot -maxdepth 2 -name '*.log' -exec cp {} crash-diagnostics/ \; 2>/dev/null || true
+          {
+            echo "=== pgrep zig ==="; pgrep -af "zig " || true
+            echo "=== pgrep zls ==="; pgrep -af "zls" || true
+            echo "=== core dumps ==="; coredumpctl list --no-pager 2>/dev/null || ls core* /var/crash 2>/dev/null || true
+          } > crash-diagnostics/processes.txt 2>&1 || true
+
+      - name: Upload crash diagnostics
+        if: failure()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: gzscript-crash-diagnostics
+          path: crash-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
   package:
     name: Package combined artifact
     needs: [build, integration]

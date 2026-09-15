@@ -21,6 +21,10 @@ public:
   ~GzLanguage();
   static GzLanguage *get_singleton() { return singleton; }
   void pump_language_server();
+  // Idempotent runtime shutdown contribution: stops the language server while
+  // engine singletons are still alive. Called from _finish() and from the
+  // extension terminator (whichever runs first wins).
+  void shutdown();
   godot::Ref<godot::Script>
   make_template_for_base(const godot::String &base_class_name) const;
 

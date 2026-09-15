@@ -2,16 +2,22 @@
 
 #include "gz_compiled_module.hpp"
 #include "gz_file_utils.hpp"
+#include "gz_lifecycle.hpp"
 #include "gz_script.hpp"
 
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/object.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <memory>
 #include <string>
 
+// Shutdown ordering (see register_types.cpp):
+//   GzBuildManager::shutdown() runs BEFORE the script language is
+//   unregistered, so no compile completion can publish into a dead language.
+// shutdown() is idempotent: repeated calls (terminator + destructor) are safe.
 class GzBuildManager : public godot::Object {
   GDCLASS(GzBuildManager, godot::Object)
 
@@ -20,7 +26,7 @@ class GzBuildManager : public godot::Object {
   uint64_t next_request_id = 1;
   uint64_t current_generation = 0;
 
-  // ponytail: Cache zig version to avoid spawning a subprocess on every prepare().
+  // Cache zig version to avoid spawning a subprocess on every prepare().
   godot::String cached_zig_executable;
   godot::String cached_zig_version;
 
@@ -63,6 +69,7 @@ class GzBuildManager : public godot::Object {
 
   std::deque<CompileRequest> pending;
   std::unique_ptr<ActiveCompile> active;
+  std::atomic<bool> shutdown_started{false};
 
   bool prepare(const godot::String &resource_path,
                const godot::String &source, uint64_t request_id,
@@ -90,6 +97,8 @@ public:
 
   std::shared_ptr<GzCompiledModule> compile(const godot::String &resource_path,
                                             const godot::String &source);
+  void shutdown();
+  bool is_shutdown() const { return shutdown_started.load(); }
   void queue_compile(const godot::Ref<GzScript> &script);
   void queue_saved(const godot::Ref<GzScript> &script,
                    const godot::String &saved_path);

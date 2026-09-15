@@ -64,6 +64,26 @@ run_godot_script() {
 
 run_step "Run basic integration scene" run_godot
 run_godot_script "Validate live bindings and ABI" tests/live_bindings_runner.gd GZSCRIPT_LIVE_BINDINGS_OK
+run_godot_script "Validate script/module/instance lifecycle" tests/lifecycle/shutdown_runner.gd GZSCRIPT_LIFECYCLE_OK
+printf '[RUN] Validate lifecycle with instances abandoned in tree\n'
+if abandon_output=$(GZ_LIFECYCLE_ABANDON=1 run_godot --script tests/lifecycle/shutdown_runner.gd 2>&1); then
+  :
+else
+  status=$?
+  printf '%s\n' "$abandon_output" >&2
+  printf '[FAIL] Validate lifecycle with instances abandoned in tree\n' >&2
+  exit "$status"
+fi
+case "$abandon_output" in
+  *"GZSCRIPT_LIFECYCLE_OK"*)
+    printf '[PASS] Validate lifecycle with instances abandoned in tree\n'
+    ;;
+  *)
+    printf '%s\n' "$abandon_output" >&2
+    printf '[FAIL] Validate lifecycle with instances abandoned in tree\n' >&2
+    exit 1
+    ;;
+esac
 expect_diagnostics "Save tests compile intentionally invalid Zig source"
 run_godot_script "Validate asynchronous saves" tests/save_runner.gd GZSCRIPT_SAVE_OK
 expect_diagnostics "Cache tests reject worker compilation and intentionally corrupt modules"

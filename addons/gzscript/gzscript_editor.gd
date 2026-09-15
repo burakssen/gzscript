@@ -94,7 +94,7 @@ func _ensure_zig_highlighter(script) -> void:
 	var current := code_edit.syntax_highlighter
 	if current != null and current.get_script() == ZigHighlighter:
 		return
-	# ponytail: add one migration clone because Godot does not expose registered per-tab clones.
+	# add one migration clone because Godot does not expose registered per-tab clones.
 	var highlighter: EditorSyntaxHighlighter = ZigHighlighter.new()
 	editor.add_syntax_highlighter(highlighter)
 	code_edit.set_syntax_highlighter(highlighter)
@@ -116,7 +116,7 @@ func _retry_zls_completion(path: String) -> void:
 		return
 	var code_edit := editor.get_base_editor() as CodeEdit
 	if code_edit != null:
-		# ponytail: Retry only after ZLS cached this exact request; the hook stays synchronous.
+		# Retry only after ZLS cached this exact request; the hook stays synchronous.
 		code_edit.request_code_completion(true)
 
 

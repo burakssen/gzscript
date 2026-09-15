@@ -1,7 +1,7 @@
 @tool
 extends EditorSyntaxHighlighter
 
-# ponytail: flat lexical scanner; Godot does not expose CodeHighlighter composition to GDScript.
+# flat lexical scanner; Godot does not expose CodeHighlighter composition to GDScript.
 
 const KEYWORDS := {
 	"addrspace": true, "align": true, "allowzero": true, "and": true,

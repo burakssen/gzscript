@@ -11,6 +11,14 @@
 #include <unordered_set>
 #include <vector>
 
+// Phase 1 lifetime invariants:
+//
+// 1. A GzScriptInstance never holds a callable pointer into an unloaded
+//    module: InstanceData pins its generation via shared_ptr<GzCompiledModule>.
+// 2. A module unloads only when script, instance, and job references are all
+//    gone (shared_ptr count reaches zero in ~GzCompiledModule).
+// 3. Reloads publish a new generation; old instances keep the retired module
+//    until destroyed (no instance migration in Phase 1).
 class GzScript : public godot::ScriptExtension
 {
   GDCLASS(GzScript, godot::ScriptExtension)
@@ -22,6 +30,7 @@ class GzScript : public godot::ScriptExtension
   std::shared_ptr<GzCompiledModule> module;
   bool valid = false;
   uint64_t compile_generation = 0;
+  uint64_t debug_id = 0;
 
   // The script-level module and Inspector metadata are published immediately.
   // Existing instances then migrate to pending_module incrementally.

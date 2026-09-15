@@ -1,7 +1,9 @@
 #include "register_types.hpp"
 
 #include "gz_build_manager.hpp"
+#include "gz_compiled_module.hpp"
 #include "gz_language.hpp"
+#include "gz_lifecycle.hpp"
 #include "gz_resource_format.hpp"
 #include "gz_script.hpp"
 
@@ -10,6 +12,7 @@
 #include <godot_cpp/classes/resource_saver.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/memory.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
@@ -28,6 +31,10 @@ void initialize_gzscript_module(ModuleInitializationLevel level) {
   if (level != MODULE_INITIALIZATION_LEVEL_SCENE) {
     return;
   }
+
+  // The extension is reloadable: a previous termination leaves the global
+  // shutdown barrier set, so clear it for the fresh runtime.
+  gz_lifecycle::shutdown_requested().store(false, std::memory_order_release);
 
   GDREGISTER_CLASS(GzBuildManager);
   GDREGISTER_CLASS(GzLanguage);
@@ -57,6 +64,22 @@ void uninitialize_gzscript_module(ModuleInitializationLevel level) {
     return;
   }
 
+  // Phase 1 shutdown order (deliberate, not destructor-emergent):
+  //   1. Claim the global barrier: no new compiles, LSP requests, or loads.
+  //   2. Shut down the compiler first so no completion can publish into a
+  //      half-torn-down language (and child processes are reaped).
+  //   3. Shut down the language server while engine singletons are alive.
+  //   4. Clear thread-local Godot-object caches before the engine dies.
+  //   5. Unregister Godot-facing state, then destroy managers (idempotent).
+  gz_lifecycle::begin_shutdown();
+  if (build_manager) {
+    build_manager->shutdown();
+  }
+  if (language) {
+    language->shutdown();
+  }
+  GzCompiledModule::clear_thread_caches();
+
   if (ResourceSaver *rs = ResourceSaver::get_singleton()) {
     rs->remove_resource_format_saver(resource_saver);
   }
@@ -78,6 +101,18 @@ void uninitialize_gzscript_module(ModuleInitializationLevel level) {
     memdelete(build_manager);
     build_manager = nullptr;
   }
+
+#ifdef DEBUG_ENABLED
+  {
+    const auto &count = gz_lifecycle::counters();
+    UtilityFunctions::print(
+        "[GZ] shutdown summary: scripts=", count.scripts.load(),
+        " instances=", count.instances.load(),
+        " modules=", count.modules.load(),
+        " compile_jobs=", count.compile_jobs.load(),
+        " lsp=", count.lsp_processes.load());
+  }
+#endif
 }
 
 extern "C" {

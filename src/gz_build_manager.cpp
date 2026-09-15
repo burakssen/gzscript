@@ -416,26 +416,46 @@ GzBuildManager::GzBuildManager()
 
 GzBuildManager::~GzBuildManager()
 {
+  shutdown();
+  if (singleton == this)
+  {
+    singleton = nullptr;
+  }
+}
+
+// Idempotent shutdown: terminate the compiler process tree (bounded wait so
+// teardown can never hang), drop queued work, and release the active job.
+// Safe to call from both the extension terminator and the destructor.
+void GzBuildManager::shutdown()
+{
+  if (shutdown_started.exchange(true))
+    return;
+  GZ_TRACE("runtime", 0, "compiler shutdown_begin");
   if (active)
   {
     gz_terminate_process_tree(active->pid);
     if (OS *os = OS::get_singleton())
     {
+      uint64_t deadline = 0;
+      if (Time *time = Time::get_singleton())
+        deadline = time->get_ticks_msec() + 2000;
       while (os->is_process_running(active->pid))
       {
         gz_terminate_process_tree(active->pid);
+        if (deadline != 0 && Time::get_singleton() &&
+            Time::get_singleton()->get_ticks_msec() >= deadline)
+          break;
         os->delay_msec(1);
       }
     }
     DirAccess::remove_absolute(active->plan.compile_output);
     DirAccess::remove_absolute(active->plan.generated);
+    gz_lifecycle::counters().compile_jobs.fetch_sub(1,
+                                                    std::memory_order_relaxed);
   }
   pending.clear();
   active.reset();
-  if (singleton == this)
-  {
-    singleton = nullptr;
-  }
+  GZ_TRACE("runtime", 0, "compiler shutdown_complete");
 }
 
 bool GzBuildManager::prepare(const String &resource_path, const String &source,
@@ -507,7 +527,7 @@ bool GzBuildManager::prepare(const String &resource_path, const String &source,
   }
 
   String zig_executable = get_zig_executable();
-  // ponytail: Cache zig version — spawning a subprocess per prepare() costs ~200-500ms.
+  // Cache zig version — spawning a subprocess per prepare() costs ~200-500ms.
   if (cached_zig_executable != zig_executable || cached_zig_version.is_empty())
   {
     String version_result;
@@ -718,6 +738,9 @@ GzBuildManager::finish(const CompilePlan &plan, int exit_code,
 std::shared_ptr<GzCompiledModule>
 GzBuildManager::compile(const String &resource_path, const String &source)
 {
+  if (shutdown_started.load(std::memory_order_acquire) ||
+      gz_lifecycle::is_shutting_down())
+    return {};
   wait_for_all();
   for (int attempt = 0; attempt < 3; ++attempt)
   {
@@ -779,6 +802,9 @@ GzBuildManager::compile(const String &resource_path, const String &source)
 
 void GzBuildManager::queue_compile(const Ref<GzScript> &script)
 {
+  if (shutdown_started.load(std::memory_order_acquire) ||
+      gz_lifecycle::is_shutting_down())
+    return;
   if (!Thread::is_main_thread())
   {
     UtilityFunctions::printerr(
@@ -847,7 +873,9 @@ bool GzBuildManager::is_compiling() const
 
 void GzBuildManager::start_next()
 {
-  // ponytail: Serialize builds to avoid cache races and cap Zig memory use.
+  if (shutdown_started.load(std::memory_order_acquire))
+    return;
+  // Serialize builds to avoid cache races and cap Zig memory use.
   while (!active && !pending.empty())
   {
     CompileRequest request = std::move(pending.front());
@@ -961,6 +989,8 @@ void GzBuildManager::start_next()
     gz_isolate_process(active->pid);
     active->started_at_msec = Time::get_singleton()->get_ticks_msec();
     active->cache_lock = std::move(cache_lock);
+    gz_lifecycle::counters().compile_jobs.fetch_add(1,
+                                                    std::memory_order_relaxed);
   }
 }
 
@@ -1057,6 +1087,8 @@ void GzBuildManager::pump()
 {
   if (!Thread::is_main_thread())
     return;
+  if (shutdown_started.load(std::memory_order_acquire))
+    return;
   start_next();
   if (!active)
     return;
@@ -1087,6 +1119,7 @@ void GzBuildManager::pump()
 void GzBuildManager::complete_active(int exit_code)
 {
   std::unique_ptr<ActiveCompile> completed = std::move(active);
+  gz_lifecycle::counters().compile_jobs.fetch_sub(1, std::memory_order_relaxed);
   if (completed->output_truncated)
     completed->output += OUTPUT_TRUNCATED;
   if (completed->stdout_pipe.is_valid())
@@ -1145,7 +1178,7 @@ void GzBuildManager::complete_active(int exit_code)
   auto module = finish(completed->plan, exit_code,
                        String::utf8(completed->output.data(),
                                     completed->output.size()));
-  // ponytail: Load modules and mutate Script state only on Godot's main thread.
+  // Load modules and mutate Script state only on Godot's main thread.
   if (module)
   {
     script->publish_module(std::move(module));

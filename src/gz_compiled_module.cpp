@@ -1,4 +1,5 @@
 #include "gz_compiled_module.hpp"
+#include "gz_lifecycle.hpp"
 #include "gz_value_codec.hpp"
 
 #include <godot_cpp/classes/object.hpp>
@@ -109,8 +110,14 @@ namespace
   }
 
   // Own keys because method names can originate in unloadable script modules.
+  // Values are Godot StringNames: they must be cleared via
+  // clear_thread_caches() during extension shutdown, otherwise the
+  // thread-exit destructor would destroy engine objects after Godot tore
+  // down its string table (SIGABRT at process exit).
   static thread_local std::unordered_map<std::string, StringName>
       method_name_cache;
+
+  void clear_method_name_cache() { method_name_cache.clear(); }
 
   StringName get_cached_name(GzStringView view)
   {
@@ -239,7 +246,11 @@ namespace
     {
     case GDEXTENSION_CALL_OK:
     {
-      static thread_local CharString string_storage;
+      // String conversions need scratch storage whose lifetime covers the
+      // call. This must be a plain local: a static/thread_local CharString
+      // would be destroyed at thread exit, after Godot shutdown, and abort
+      // the process.
+      CharString string_storage;
       bool valid = false;
       *result = gzscript::from_variant(call_result, &string_storage, &valid);
       return valid ? GZ_STATUS_OK : GZ_STATUS_TYPE_MISMATCH;
@@ -389,10 +400,25 @@ namespace
 
 } // namespace
 
+GzCompiledModule::GzCompiledModule()
+    : debug_id(gz_lifecycle::allocate_debug_id())
+{
+  gz_lifecycle::counters().modules.fetch_add(1, std::memory_order_relaxed);
+  GZ_TRACE("module", debug_id, "created");
+}
+
+void GzCompiledModule::clear_thread_caches() { clear_method_name_cache(); }
+
 GzCompiledModule::~GzCompiledModule()
 {
+  GZ_TRACE("module", debug_id, "unloading");
   if (handle)
     close_library(handle);
+  // Poison so any post-unload use traps deterministically in debug builds
+  // instead of jumping into unmapped memory.
+  handle = nullptr;
+  descriptor = nullptr;
+  gz_lifecycle::counters().modules.fetch_sub(1, std::memory_order_relaxed);
 }
 
 int32_t GzCompiledModule::find_property(const StringName &name) const
@@ -564,6 +590,7 @@ GzCompiledModule::load(const String &p_path, String &error)
     {
       error = "Compiled Zig script has duplicate property name: " +
               String(property_name);
+      close_library(handle);
       return {};
     }
 

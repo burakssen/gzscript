@@ -9,7 +9,7 @@
 #endif
 #include <windows.h>
 #ifdef ERROR
-#undef ERROR // ponytail: undefine WinGDI ERROR macro to avoid conflict with GzFileLock::Result::ERROR
+#undef ERROR // undefine WinGDI ERROR macro to avoid conflict with GzFileLock::Result::ERROR
 #endif
 #else
 #include <cerrno>

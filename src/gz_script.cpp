@@ -2,6 +2,7 @@
 
 #include "gz_build_manager.hpp"
 #include "gz_language.hpp"
+#include "gz_lifecycle.hpp"
 #include "gz_value_codec.hpp"
 
 #include <godot_cpp/classes/engine.hpp>
@@ -30,6 +31,7 @@ namespace
     std::shared_ptr<GzCompiledModule> module;
     void *zig_instance = nullptr;
     std::vector<Variant> retained_objects;
+    uint64_t debug_id = 0;
   };
 
   MethodInfo signal_method_info(const GzSignalDescriptor &signal)
@@ -347,14 +349,24 @@ namespace
   GDExtensionBool instance_is_placeholder(void *) { return false; }
   GDExtensionScriptLanguagePtr instance_get_language(void *)
   {
-    return GzLanguage::get_singleton()->_owner;
+    // Lingering callbacks during extension teardown must not dereference a
+    // destroyed language singleton.
+    if (GzLanguage *language = GzLanguage::get_singleton())
+      return language->_owner;
+    return nullptr;
   }
 
   void instance_free(void *pointer)
   {
     auto *data = static_cast<InstanceData *>(pointer);
+    // Release order matters: destroy Zig instance state first (it may call
+    // back into the module), then release the pinned module, then the script.
+    // InstanceData owns both via shared_ptr/Ref, so the executable module is
+    // guaranteed to outlive this call (Phase 1 invariant 1).
     data->script->remove_instance(pointer);
     data->module->get_descriptor()->destroy_instance(data->zig_instance);
+    GZ_TRACE("instance", data->debug_id, "destroyed");
+    gz_lifecycle::counters().instances.fetch_sub(1, std::memory_order_relaxed);
     delete data;
   }
 
@@ -396,15 +408,22 @@ void GzScript::_bind_methods()
                        &GzScript::_apply_active_path);
 }
 
-GzScript::GzScript()
+GzScript::GzScript() : debug_id(gz_lifecycle::allocate_debug_id())
 {
   scripts.insert(this);
+  gz_lifecycle::counters().scripts.fetch_add(1, std::memory_order_relaxed);
+  GZ_TRACE("script", debug_id, "created");
 }
 
 GzScript::~GzScript()
 {
+  GZ_TRACE("script", debug_id, "destroyed");
+  gz_lifecycle::counters().scripts.fetch_sub(1, std::memory_order_relaxed);
   pending_refresh = false;
   pending_module.reset();
+  // Releasing `module` here only unloads the native library when no live
+  // instance still pins it (shared ownership with InstanceData).
+  module.reset();
   scripts.erase(this);
 }
 
@@ -574,10 +593,14 @@ void *GzScript::_instance_create(Object *owner) const
   data->owner = owner;
   data->script = Ref<GzScript>(const_cast<GzScript *>(this));
   data->module = module;
+  data->debug_id = gz_lifecycle::allocate_debug_id();
+  gz_lifecycle::counters().instances.fetch_add(1, std::memory_order_relaxed);
+  GZ_TRACE("instance", data->debug_id, "created");
   data->retained_objects.resize(module->get_descriptor()->property_count);
   if (module->get_descriptor()->create_instance(
           owner->get_instance_id(), &data->zig_instance) != GZ_STATUS_OK)
   {
+    gz_lifecycle::counters().instances.fetch_sub(1, std::memory_order_relaxed);
     delete data;
     return nullptr;
   }

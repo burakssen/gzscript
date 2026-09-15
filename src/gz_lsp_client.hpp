@@ -1,10 +1,13 @@
 #pragma once
 
+#include "gz_lifecycle.hpp"
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -51,6 +54,7 @@ class GzLspClient
 
   GzLanguage *language = nullptr;
   State state = State::STOPPED;
+  std::atomic<bool> shutdown_started{false};
   godot::Ref<godot::FileAccess> stdio_pipe;
   godot::Ref<godot::FileAccess> stderr_pipe;
   std::string input;
@@ -109,4 +113,7 @@ public:
   godot::Dictionary lookup(const godot::String &code,
                            const godot::String &path);
   void pump();
+  // Idempotent: stop accepting requests, send LSP shutdown/exit, close
+  // stdin, terminate the server, and release pipes. Destructor calls it.
+  void shutdown();
 };
