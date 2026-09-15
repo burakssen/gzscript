@@ -14,6 +14,7 @@ Only behavior that genuinely requires Godot is tested through Godot.
 | concurrency | races, cross-process locks | headless `--script` | `run.sh concurrency` |
 | runtime | script behavior (bindings, rejections) | headless `--script` | `run.sh runtime` |
 | lifecycle | create/destroy/reload/shutdown, module generations | headless `--script` | `run.sh lifecycle` |
+| diagnostics | engine-independent store unit tests (<5s, no Godot) | no | `run.sh diagnostics` |
 | lsp | ZLS completion transport (skips without ZLS) | `--editor --script` | `run.sh lsp` |
 | editor | language registration, reload, inspector refresh | `--editor --script` | `run.sh editor` |
 | integration | realistic end-to-end (basic scene) | headless | `run.sh integration` |

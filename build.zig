@@ -238,6 +238,14 @@ pub fn build(b: *std.Build) void {
         cxx_flags,
     );
 
+    // Dedicated diagnostics subsystem (see docs/diagnostics.md).
+    addTopLevelCppSources(
+        b,
+        gzscript_module,
+        b.path("src/diagnostics"),
+        cxx_flags,
+    );
+
     gzscript_module.linkLibrary(godot_cpp);
 
     // Mirrors godot-cpp's Linux $ORIGIN rpath behavior.

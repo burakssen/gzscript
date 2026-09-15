@@ -1,5 +1,6 @@
 #include "register_types.hpp"
 
+#include "diagnostics/gz_diagnostic_store.hpp"
 #include "gz_build_manager.hpp"
 #include "gz_compiled_module.hpp"
 #include "gz_language.hpp"
@@ -14,6 +15,8 @@
 #include <godot_cpp/core/memory.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <memory>
+
 using namespace godot;
 
 namespace {
@@ -21,6 +24,10 @@ GzLanguage *language = nullptr;
 GzBuildManager *build_manager = nullptr;
 Ref<GzResourceLoader> resource_loader;
 Ref<GzResourceSaver> resource_saver;
+// Runtime-owned diagnostic store. Created before the managers and destroyed
+// after them, so it outlives every current and future (Phases 5-6) producer.
+// Producers submit complete batches; the language only reads snapshots.
+std::shared_ptr<GzDiagnosticStore> diagnostic_store;
 } // namespace
 
 void initialize_gzscript_module(ModuleInitializationLevel level) {
@@ -44,6 +51,8 @@ void initialize_gzscript_module(ModuleInitializationLevel level) {
 
   build_manager = memnew(GzBuildManager);
   language = memnew(GzLanguage);
+  diagnostic_store = std::make_shared<GzDiagnosticStore>();
+  language->set_diagnostic_store(diagnostic_store);
   Engine::get_singleton()->register_singleton("GzBuildManager", build_manager);
   Engine::get_singleton()->register_script_language(language);
 
@@ -101,6 +110,9 @@ void uninitialize_gzscript_module(ModuleInitializationLevel level) {
     memdelete(build_manager);
     build_manager = nullptr;
   }
+  // Destroyed last: no producer may write after this point. Producers were
+  // already stopped and joined by the shutdown calls above.
+  diagnostic_store.reset();
 
 #ifdef DEBUG_ENABLED
   {

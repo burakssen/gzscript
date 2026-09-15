@@ -8,7 +8,9 @@ cd "$REPO_ROOT"
 BUILD_MODE=${BUILD_MODE:-Debug}
 TIMEOUT_SECS=${TIMEOUT_SECS:-120}
 
-zig build --prefix . "-Doptimize=$BUILD_MODE"
+if [ "${GZSCRIPT_SKIP_BUILD:-0}" != "1" ]; then
+  zig build --prefix . "-Doptimize=$BUILD_MODE"
+fi
 
 zig_executable=$(command -v zig)
 zls_executable=$(command -v zls || true)

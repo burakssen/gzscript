@@ -1,5 +1,7 @@
 #pragma once
 
+#include "diagnostics/gz_diagnostic_store.hpp"
+
 #include <godot_cpp/classes/script_language_extension.hpp>
 
 #include <memory>
@@ -12,6 +14,9 @@ class GzLanguage : public godot::ScriptLanguageExtension
 
   static GzLanguage *singleton;
   mutable std::unique_ptr<GzLspClient> lsp_client;
+  // Runtime-owned diagnostic store (see register_types.cpp). The language
+  // only consumes snapshots; producers (Phases 5-6) submit to the store.
+  std::shared_ptr<GzDiagnosticStore> diagnostic_store;
 
 protected:
   static void _bind_methods();
@@ -21,6 +26,12 @@ public:
   ~GzLanguage();
   static GzLanguage *get_singleton() { return singleton; }
   void pump_language_server();
+  void set_diagnostic_store(std::shared_ptr<GzDiagnosticStore> store) {
+    diagnostic_store = std::move(store);
+  }
+  const std::shared_ptr<GzDiagnosticStore> &get_diagnostic_store() const {
+    return diagnostic_store;
+  }
   // Idempotent runtime shutdown contribution: stops the language server while
   // engine singletons are still alive. Called from _finish() and from the
   // extension terminator (whichever runs first wins).

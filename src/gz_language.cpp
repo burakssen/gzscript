@@ -1,5 +1,6 @@
 #include "gz_language.hpp"
 
+#include "diagnostics/gz_diagnostic_godot_adapter.hpp"
 #include "gz_build_manager.hpp"
 #include "gz_lifecycle.hpp"
 #include "gz_lsp_client.hpp"
@@ -157,18 +158,42 @@ godot::Dictionary GzLanguage::_validate(
     bool validate_safe_lines) const
 {
   (void)script;
-  (void)path;
   (void)validate_functions;
-  (void)validate_errors;
-  (void)validate_warnings;
-  (void)validate_safe_lines;
 
   Dictionary result;
-  result["valid"] = true;
   result["functions"] = PackedStringArray();
-  result["errors"] = Array();
-  result["warnings"] = Array();
   result["safe_lines"] = PackedInt32Array();
+
+  // Phase 4: consume the diagnostic snapshot. Nothing produces diagnostics
+  // yet, so untracked documents yield an empty snapshot (valid). Producers
+  // in Phases 5-6 only populate the store; this path stays unchanged.
+  // Compilation is never triggered here: the editor sees the most recently
+  // known snapshot.
+  if (!diagnostic_store || path.is_empty()) {
+    result["valid"] = true;
+    result["errors"] = Array();
+    result["warnings"] = Array();
+    return result;
+  }
+
+  const std::string key =
+      gzdiagnostics::store_key_for_godot_path(path);
+  if (key.empty()) {
+    result["valid"] = true;
+    result["errors"] = Array();
+    result["warnings"] = Array();
+    return result;
+  }
+
+  const GzDiagnosticSnapshot snapshot = diagnostic_store->snapshot(key);
+  result["valid"] =
+      !validate_errors || gzdiagnostics::godot_snapshot_valid(snapshot);
+  result["errors"] = validate_errors
+                         ? gzdiagnostics::godot_error_list(snapshot, path)
+                         : Array();
+  result["warnings"] =
+      validate_warnings ? gzdiagnostics::godot_warning_list(snapshot) : Array();
+  (void)validate_safe_lines;
   return result;
 }
 

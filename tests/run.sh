@@ -5,7 +5,7 @@
 #   ./tests/run.sh [options] [group|group/test ...]
 #
 # Groups: build quality unit compiler cache concurrency runtime lifecycle
-#         lsp editor integration smoke stress
+#         diagnostics lsp editor integration smoke stress
 # Profiles: fast, full (default), stress
 # Examples:
 #   ./tests/run.sh fast
@@ -38,7 +38,7 @@ usage() {
 }
 
 list_tests() {
-  printf 'groups:\n  build quality unit compiler cache concurrency runtime lifecycle lsp editor integration smoke stress\n'
+  printf 'groups:\n  build quality unit compiler cache concurrency runtime lifecycle diagnostics lsp editor integration smoke stress\n'
   printf 'profiles:\n  fast full stress\n'
   printf 'tests:\n'
   printf '  build/extension build/import\n'
@@ -48,6 +48,7 @@ list_tests() {
   printf '  concurrency/race concurrency/lock\n'
   printf '  runtime/bindings runtime/threaded\n'
   printf '  lifecycle/shutdown lifecycle/abandon\n'
+  printf '  diagnostics/model diagnostics/store diagnostics/generations diagnostics/paths diagnostics/snapshots diagnostics/concurrency diagnostics/tsan\n'
   printf '  lsp/completion\n'
   printf '  editor/language\n'
   printf '  integration/basic\n'
@@ -62,6 +63,7 @@ GROUP_TIMEOUT_secs() {
     concurrency) printf '%s' "$TIMEOUT_CONCURRENCY" ;;
     runtime) printf '%s' "$TIMEOUT_RUNTIME" ;;
     lifecycle) printf '%s' "$TIMEOUT_LIFECYCLE" ;;
+    diagnostics) printf '%s' "$TIMEOUT_DIAGNOSTICS" ;;
     lsp|editor) printf '%s' "$TIMEOUT_EDITOR" ;;
     integration) printf '%s' "$TIMEOUT_INTEGRATION" ;;
     smoke) printf '%s' "$TIMEOUT_SMOKE" ;;
@@ -322,6 +324,48 @@ do_lifecycle_shutdown() {
     tests/lifecycle/shutdown_runner.gd GZSCRIPT_LIFECYCLE_OK
 }
 
+do_diagnostics_model() {
+  exec_shell diagnostics model "Diagnostics model unit tests" \
+    -- sh "$ROOT/tests/diagnostics/run.sh" model
+}
+
+do_diagnostics_store() {
+  exec_shell diagnostics store "Diagnostics store unit tests" \
+    -- sh "$ROOT/tests/diagnostics/run.sh" store
+}
+
+do_diagnostics_generations() {
+  exec_shell diagnostics generations "Diagnostics generation unit tests" \
+    -- sh "$ROOT/tests/diagnostics/run.sh" generations
+}
+
+do_diagnostics_paths() {
+  exec_shell diagnostics paths "Diagnostics path unit tests" \
+    -- sh "$ROOT/tests/diagnostics/run.sh" paths
+}
+
+do_diagnostics_snapshots() {
+  exec_shell diagnostics snapshots "Diagnostics snapshot unit tests" \
+    -- sh "$ROOT/tests/diagnostics/run.sh" snapshots
+}
+
+do_diagnostics_concurrency() {
+  exec_shell diagnostics concurrency "Diagnostics concurrency unit tests" \
+    -- sh "$ROOT/tests/diagnostics/run.sh" concurrency
+}
+
+do_diagnostics_tsan() {
+  # ThreadSanitizer is Linux-scoped (broken runtime init on macOS with the
+  # Zig-bundled clang); the plain concurrency test covers other hosts.
+  GZSCRIPT_TSAN=1
+  export GZSCRIPT_TSAN
+  d_tsan_status=0
+  exec_shell diagnostics tsan "Diagnostics concurrency under ThreadSanitizer" \
+    -- sh "$ROOT/tests/diagnostics/run.sh" concurrency || d_tsan_status=$?
+  unset GZSCRIPT_TSAN
+  return "$d_tsan_status"
+}
+
 do_lifecycle_abandon() {
   # run_godot is a shell function, so the mode flag travels via an exported
   # variable (prefixing `env` before a function name fails with 127).
@@ -473,6 +517,7 @@ GROUP_TESTS() {
     concurrency) printf 'race lock' ;;
     runtime) printf 'bindings threaded' ;;
     lifecycle) printf 'shutdown abandon' ;;
+    diagnostics) printf 'model store generations paths snapshots concurrency' ;;
     lsp) printf 'completion' ;;
     editor) printf 'language' ;;
     integration) printf 'basic' ;;
@@ -483,8 +528,8 @@ GROUP_TESTS() {
 
 expand_target() {
   case "$1" in
-    fast) printf 'build quality unit compiler cache runtime/bindings lifecycle' ;;
-    full) printf 'build quality unit compiler cache concurrency runtime lifecycle lsp editor integration smoke' ;;
+    fast) printf 'build quality unit compiler cache runtime/bindings lifecycle diagnostics' ;;
+    full) printf 'build quality unit compiler cache concurrency runtime lifecycle diagnostics lsp editor integration smoke' ;;
     stress) printf 'stress' ;;
     *) printf '%s' "$1" ;;
   esac
@@ -514,7 +559,7 @@ print_summary() {
   gz_log "Failed:   $p_fail"
   gz_log "Skipped:  $p_skip"
   gz_log "Flaky:    $p_flaky"
-  for p_g in build quality unit compiler cache concurrency runtime lifecycle lsp editor integration smoke stress; do
+  for p_g in build quality unit compiler cache concurrency runtime lifecycle diagnostics lsp editor integration smoke stress; do
     if [ -f "$(gz_results_dir "$p_g")/results.jsonl" ]; then
       gz_write_junit "$p_g"
     fi
@@ -538,7 +583,7 @@ main() {
   setup_invocation
   gz_print_environment
 
-  m_valid_groups=" build quality unit compiler cache concurrency runtime lifecycle lsp editor integration smoke stress "
+  m_valid_groups=" build quality unit compiler cache concurrency runtime lifecycle diagnostics lsp editor integration smoke stress "
   m_needs_build=0
   m_wipe_cache=0
   for m_arg in "$@"; do
@@ -554,7 +599,9 @@ main() {
         *" $m_g "*) : ;;
         *) gz_log "unknown group or test: $m_target" >&2; return 2 ;;
       esac
-      m_needs_build=1
+      case "$m_g" in
+        compiler|cache|concurrency|runtime|lifecycle|lsp|editor|integration|smoke|stress|build) m_needs_build=1 ;;
+      esac
       case "$m_g" in
         cache) m_wipe_cache=1 ;;
       esac

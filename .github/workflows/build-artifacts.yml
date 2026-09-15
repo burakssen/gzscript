@@ -142,6 +142,8 @@ jobs:
             group: runtime
           - label: Lifecycle
             group: lifecycle
+          - label: Diagnostics
+            group: diagnostics
           - label: ZLS
             group: lsp
           - label: Editor
@@ -365,6 +367,9 @@ jobs:
         run: |
           export LD_PRELOAD="$(gcc -print-file-name=libasan.so):$(gcc -print-file-name=libubsan.so)"
           sh tests/run.sh --no-build lifecycle compiler
+
+      - name: Run diagnostics concurrency tests under ThreadSanitizer
+        run: GZSCRIPT_TSAN=1 sh tests/run.sh --no-build diagnostics/concurrency
 
       - name: Upload sanitizer results
         if: always()
